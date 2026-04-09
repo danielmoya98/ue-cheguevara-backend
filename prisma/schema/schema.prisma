@@ -14,9 +14,473 @@ datasource db {
   provider = "postgresql"
 }
 
-model Product {
-  id Int @default(autoincrement()) @id
+// ==========================================
+// ENUMS (Dominios de datos estrictos oficiales)
+// ==========================================
 
-  name String
-  description String?
+enum Role {
+  ADMIN // Director / Administrador principal
+  SECRETARIA // Secretaría Académica
+  DOCENTE // Plantel Docente (Web & App)
+}
+
+enum UserStatus {
+  ACTIVE // Puede ingresar al sistema
+  INACTIVE // Cuenta bloqueada/suspendida
+}
+
+enum DependencyType {
+  FISCAL // Público
+  PRIVADA // Privado
+  CONVENIO // Mixto / Iglesia
+}
+
+enum Department {
+  CHUQUISACA
+  LA_PAZ
+  COCHABAMBA
+  ORURO
+  POTOSI
+  TARIJA
+  SANTA_CRUZ
+  BENI
+  PANDO
+}
+
+enum Shift {
+  MANANA
+  TARDE
+  NOCHE
+}
+
+enum EducationLevel {
+  INICIAL
+  PRIMARIA
+  SECUNDARIA
+}
+
+// ==========================================
+// MODELOS
+// ==========================================
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String // Hash de la contraseña (NUNCA en texto plano)
+  fullName String @map("full_name")
+
+  // Control de Accesos
+  role   Role       @default(DOCENTE)
+  status UserStatus @default(ACTIVE)
+
+  // Flujo de Onboarding (Setup Password)
+  requiresPasswordChange Boolean @default(true) @map("requires_password_change")
+
+  // Auditoría
+  lastLoginAt DateTime? @map("last_login_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // --- NUEVOS CAMPOS DE PERFIL (Agrega esto) ---
+  ci        String? // Carnet de Identidad
+  phone     String? // Teléfono
+  address   String? // Dirección
+  specialty String? // Especialidad (Ej. Matemáticas)
+
+  // ==========================================
+  // RELACIONES CON INSTITUCIÓN
+  // ==========================================
+
+  // 1. Relación: El colegio donde trabaja este usuario (Docente, Secretaria o Admin)
+  institutionId String?      @map("institution_id")
+  institution   Institution? @relation("InstitutionStaff", fields: [institutionId], references: [id])
+
+  // 2. Relación Inversa: El colegio que este usuario dirige (Solo aplica si es el Director General)
+  directedInstitution Institution?        @relation("InstitutionDirector")
+  classrooms          Classroom[]         @relation("ClassroomAdvisor")
+  teacherAssignments  TeacherAssignment[] @relation("TeacherAssignments")
+  scheduleSlots       ScheduleSlot[]
+
+  @@map("users")
+}
+
+model Institution {
+  id             String         @id @default(uuid())
+  rueCode        String         @unique @map("rue_code") // Código RUE / SIE (Ej. 80730145)
+  name           String // Nombre oficial (Ej. Unidad Educativa Che Guevara)
+  dependencyType DependencyType @map("dependency_type")
+
+  // Ubicación Geográfica (Estructura SIE)
+  department   Department
+  municipality String // Ej. Sucre
+  district     String // Distrito Educativo (Ej. Sucre 1)
+  address      String
+
+  // Contacto e Información
+  phone       String?
+  email       String?
+  foundedYear Int?    @map("founded_year")
+
+  // Capacidades Operativas autorizadas
+  shifts Shift[] // Ej. [MANANA, TARDE]
+  levels EducationLevel[] // Ej. [PRIMARIA, SECUNDARIA]
+
+  // ==========================================
+  // RELACIONES CON USUARIOS
+  // ==========================================
+
+  // 1. El Director actual del colegio (Conexión 1 a 1)
+  directorId String? @unique @map("director_id")
+  director   User?   @relation("InstitutionDirector", fields: [directorId], references: [id])
+
+  // 2. Lista de todo el personal que trabaja aquí (Conexión 1 a Muchos)
+  staff User[] @relation("InstitutionStaff")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("institutions")
+}
+
+// ==========================================
+// MÓDULO ACADÉMICO (Estructura Base)
+// ==========================================
+
+enum AcademicStatus {
+  PLANNING // Gestión futura en planificación (Ej. Diciembre preparando el próximo año)
+  ACTIVE // Gestión actual en curso
+  CLOSED // Gestión histórica cerrada (Solo lectura, libretas selladas)
+}
+
+// 1. GESTIÓN ESCOLAR (El Año Lectivo)
+model AcademicYear {
+  id        String         @id @default(uuid())
+  year      Int            @unique // Ej. 2026
+  name      String // Ej. "Gestión Académica 2026"
+  startDate DateTime       @map("start_date")
+  endDate   DateTime       @map("end_date")
+  status    AcademicStatus @default(PLANNING)
+
+  classrooms Classroom[]
+
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  enrollments Enrollment[]
+
+  @@map("academic_years")
+}
+
+// 2. MATERIAS / ASIGNATURAS (Catálogo Global)
+model Subject {
+  id    String         @id @default(uuid())
+  name  String // Ej. "Matemáticas", "Física"
+  level EducationLevel // Para filtrar (Ej. Física solo sale en Secundaria)
+  area  String? // Ej. "Ciencias Exactas", "Ciencias Sociales"
+
+  assignments TeacherAssignment[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("subjects")
+}
+
+// 3. CURSO / AULA (La intersección física/lógica de todo)
+model Classroom {
+  id             String       @id @default(uuid())
+  academicYearId String       @map("academic_year_id")
+  academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
+
+  // Reglas RUE
+  level   EducationLevel // Ej. SECUNDARIA
+  shift   Shift // Ej. MANANA
+  grade   String // Ej. "Primero", "Segundo", "Sexto"
+  section String // PARALELO: Ej. "A", "B", "C"
+
+  capacity Int @default(35) // Límite de alumnos por aula
+
+  // Docente Asesor / Tutor del Curso
+  advisorId String? @map("advisor_id")
+  advisor   User?   @relation("ClassroomAdvisor", fields: [advisorId], references: [id])
+
+  // Relaciones
+  subjectAssignments TeacherAssignment[]
+  // enrollments     Enrollment[]        // <-- Lo activaremos en el próximo módulo (Estudiantes)
+
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  scheduleSlots ScheduleSlot[]
+  enrollments   Enrollment[]
+
+  // REGLA DE ORO DE BASE DE DATOS:
+  // No pueden existir dos "1ro A de Secundaria en la Mañana" en el mismo año.
+  @@unique([academicYearId, level, grade, section, shift])
+  @@map("classrooms")
+}
+
+// 4. DISTRIBUCIÓN DE CARGA HORARIA (Docente <-> Materia <-> Curso)
+model TeacherAssignment {
+  id String @id @default(uuid())
+
+  classroomId String    @map("classroom_id")
+  classroom   Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+
+  subjectId String  @map("subject_id")
+  subject   Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  teacherId String @map("teacher_id")
+  teacher   User   @relation("TeacherAssignments", fields: [teacherId], references: [id])
+
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  scheduleSlots ScheduleSlot[]
+
+  // REGLA: En un mismo curso, una materia solo la dicta un profesor titular
+  @@unique([classroomId, subjectId])
+  @@map("teacher_assignments")
+}
+
+// 1. Catálogo de Periodos de Clase (Los horarios fijos del colegio)
+model ClassPeriod {
+  id        String  @id @default(uuid())
+  name      String // Ej. "1er Periodo" o "Recreo"
+  startTime String // Ej. "08:00"
+  endTime   String // Ej. "08:40"
+  shift     Shift // MANANA, TARDE, NOCHE
+  isBreak   Boolean @default(false) // Si es true, la UI lo pinta como recreo y no deja soltar materias
+  order     Int // Para ordenarlos cronológicamente (1, 2, 3...)
+
+  schedules ScheduleSlot[]
+
+  @@map("class_periods")
+}
+
+// 2. El Casillero del Horario (La celda donde cae la materia)
+model ScheduleSlot {
+  id        String @id @default(uuid())
+  dayOfWeek Int // 1 = Lunes, 2 = Martes, ..., 5 = Viernes
+
+  classPeriodId       String @map("class_period_id")
+  teacherAssignmentId String @map("teacher_assignment_id")
+
+  // 🔥 DESNORMALIZACIÓN ESTRATÉGICA PARA REGLAS DE ORO
+  classroomId String @map("classroom_id")
+  teacherId   String @map("teacher_id")
+
+  // Relaciones
+  classPeriod       ClassPeriod       @relation(fields: [classPeriodId], references: [id])
+  teacherAssignment TeacherAssignment @relation(fields: [teacherAssignmentId], references: [id], onDelete: Cascade)
+  classroom         Classroom         @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  teacher           User              @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  // 🛡️ REGLA DE ORO 1: Un curso NO puede tener dos materias a la misma hora
+  @@unique([classroomId, dayOfWeek, classPeriodId])
+  // 🛡️ REGLA DE ORO 2: Un profesor NO puede dictar clases en dos cursos distintos a la misma hora
+  @@unique([teacherId, dayOfWeek, classPeriodId])
+  @@map("schedule_slots")
+}
+
+// ==========================================
+// MÓDULO 3: ESTUDIANTES E INSCRIPCIONES (RUDE)
+// ==========================================
+
+enum Gender {
+  MASCULINO
+  FEMENINO
+}
+
+enum EnrollmentStatus {
+  REVISION_SIE // Esperando que el director valide el RUDE en el Ministerio
+  INSCRITO // Oficialmente activo en el curso
+  RETIRADO // Abandonó el colegio a medio año
+  TRASPASO // Se trasladó a otra unidad educativa
+  RECHAZADO // 👈 ¡Faltaba este para la acción de la secretaria!
+  OBSERVADO // (Opcional) Por si le falta algún documento
+}
+
+enum EnrollmentType {
+  NUEVO // Entra por primera vez al colegio o al sistema escolar
+  ANTIGUO // Ratificación automática
+  TRASPASO // Viene trasladado de otro colegio en Bolivia
+  EXTRANJERO // Viene de otro país (Requiere homologación)
+}
+
+// 1. EL ESTUDIANTE (Catálogo Inmutable Global)
+model Student {
+  id       String  @id @default(uuid())
+  rudeCode String? @unique // Nullable porque los NUEVOS aún no lo tienen
+
+  // Identificación
+  documentType String  @default("CI") // CI, DNI, PASAPORTE, DECLARACION
+  ci           String? @unique
+  complement   String?
+  expedition   String? // LP, CB, SC, etc.
+
+  // Nombres
+  lastNamePaterno String?
+  lastNameMaterno String?
+  names           String
+
+  gender          Gender
+  birthDate       DateTime
+  birthCountry    String   @default("BOLIVIA")
+  birthDepartment String?
+  birthProvince   String?
+  birthLocality   String?
+
+  // Certificado de Nacimiento Oficial (Para cotejo SIE)
+  certOficialia String?
+  certLibro     String?
+  certPartida   String?
+  certFolio     String?
+
+  // Capacidades Diferentes (Salud Crónica)
+  hasDisability       Boolean @default(false)
+  disabilityCode      String? // IBC/CODEPEDIS
+  disabilityType      String?
+  disabilityDegree    String?
+  hasAutism           Boolean @default(false)
+  autismType          String?
+  learningDisability  Boolean @default(false)
+  extraordinaryTalent Boolean @default(false)
+  disabilityRegistry  String? // Para guardar si es "CODEPEDIS" o "IBC"
+  disabilityOrigin    String? // Para guardar "DE_NACIMIENTO" o "ADQUIRIDA"
+
+  // 2.10 Dificultades de Aprendizaje
+  learningDisabilityStatus String   @default("NO") // DIAGNOSTICO, INFORME, SIN_DIAGNOSTICO, NO
+  learningDisabilityTypes  String[] // ["LECTURA_ESCRITURA", "RAZONAMIENTO", "CALCULO"]
+  learningSupportLocation  String[] // ["UNIDAD_EDUCATIVA", "CENTRO_ESPECIAL", ...]
+
+  // 2.11 Talento Extraordinario
+  hasExtraordinaryTalent Boolean  @default(false)
+  talentType             String? // GENERAL, ESPECIFICO, DOBLE
+  talentSpecifics        String[] // ["ARTISTICO", "MUSICAL", ...] (Solo si es Específico)
+  talentIQ               String? // Coeficiente Intelectual
+  talentModality         String[] // Modalidades marcadas
+
+  // Relaciones
+  enrollments Enrollment[]
+  guardians   StudentGuardian[] // Relación con padres/tutores
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 2. LA INSCRIPCIÓN (El evento Anual)
+model Enrollment {
+  id             String @id @default(uuid())
+  studentId      String
+  classroomId    String
+  academicYearId String
+
+  enrollmentType EnrollmentType
+  status         EnrollmentStatus @default(REVISION_SIE)
+
+  date DateTime @default(now())
+
+  // Relaciones
+  student      Student      @relation(fields: [studentId], references: [id])
+  classroom    Classroom    @relation(fields: [classroomId], references: [id])
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+
+  // El Formulario RUDE está anclado a esta inscripción anual
+  rudeRecord RudeRecord?
+
+  // Regla de Negocio: Un estudiante NO puede inscribirse dos veces en el mismo año
+  @@unique([studentId, academicYearId])
+}
+
+// 3. PADRES Y TUTORES (Reutilizables si tienen varios hijos)
+model Guardian {
+  id              String    @id @default(uuid())
+  ci              String?   @unique
+  complement      String?
+  expedition      String?
+  lastNamePaterno String?
+  lastNameMaterno String?
+  names           String
+  occupation      String?
+  educationLevel  String?
+  phone           String?
+  language        String? // "CASTELLANO", "QUECHUA", etc.
+  birthDate       DateTime? // Fecha de nacimiento
+  // (Opcional, para Tutor Extraordinario 5.5)
+  jobTitle        String? // Cargo actual
+  institution     String? // Nombre de la Institución
+
+  students StudentGuardian[]
+}
+
+// Tabla Pivote para relación Estudiante <-> Tutor
+model StudentGuardian {
+  studentId    String
+  guardianId   String
+  relationship String // PADRE, MADRE, TUTOR
+
+  student  Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  guardian Guardian @relation(fields: [guardianId], references: [id], onDelete: Cascade)
+
+  @@id([studentId, guardianId])
+}
+
+// 4. EL FORMULARIO RUDE (Fotografía Anual Socioeconómica)
+model RudeRecord {
+  id           String @id @default(uuid())
+  enrollmentId String @unique
+
+  // III. Dirección Actual
+  department   String?
+  province     String?
+  municipality String?
+  locality     String?
+  zone         String?
+  street       String?
+  houseNumber  String?
+  phone        String?
+  cellphone    String?
+
+  // IV. 4.1 Idioma y Cultura
+  nativeLanguage    String?
+  frequentLanguages String[] // Ej: ["Castellano", "Quechua"]
+  culturalIdentity  String?
+
+  // IV. 4.2 Salud
+  medicalVisits       String?
+  nearestHealthCenter Boolean  @default(false)
+  healthCareLocations String[] // ["SUS", "CAJA", "PRIVADO", "FARMACIA"]
+  healthCenterVisits  String? // "1_A_2", "3_A_5", "6_MAS", "NINGUNA"
+  healthInsurance     Boolean  @default(false)
+
+  // IV. 4.3 Servicios Básicos
+  water       Boolean?
+  bathroom    Boolean?
+  sewage      Boolean?
+  electricity Boolean?
+  garbage     Boolean?
+  housingType String?
+
+  // IV. 4.4 Internet
+  internetAccess    String[]
+  internetFrequency String?
+
+  // IV. 4.5 Trabajo
+  didWork       String?
+  workType      String?
+  workShift     String[]
+  workFrequency String?
+  gotPaid       String?
+  workedMonths  String[] // ["ENE", "FEB", ...]
+
+  // IV. 4.6 Transporte
+  transportType String?
+  transportTime String?
+
+  // IV. 4.7 Abandono
+  abandonedLastYear Boolean?
+  abandonReasons    String[]
+
+  // V. 5.1 Vive Habitualmente Con
+  livesWith String? // "AMBOS", "PADRE", "MADRE", "TUTOR", "SOLO", "CENTRO_ACOGIDA"
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 }
