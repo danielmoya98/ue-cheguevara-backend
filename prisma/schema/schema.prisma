@@ -22,6 +22,8 @@ enum Role {
   ADMIN // Director / Administrador principal
   SECRETARIA // Secretaría Académica
   DOCENTE // Plantel Docente (Web & App)
+  PADRE // 🔥 NUEVO: Para la App Móvil
+  ESTUDIANTE // 🔥 NUEVO: Para la App Móvil
 }
 
 enum UserStatus {
@@ -100,6 +102,21 @@ model User {
   classrooms          Classroom[]         @relation("ClassroomAdvisor")
   teacherAssignments  TeacherAssignment[] @relation("TeacherAssignments")
   scheduleSlots       ScheduleSlot[]
+
+  // ==========================================
+  // 🔥 NUEVO: RELACIONES PARA LA APP MÓVIL
+  // ==========================================
+  // Si este usuario es un padre, se conecta a su registro físico de Tutor
+  guardianId String?   @unique @map("guardian_id")
+  guardian   Guardian? @relation(fields: [guardianId], references: [id])
+
+  // Si este usuario es un estudiante, se conecta a su registro físico de Estudiante
+  studentId String?  @unique @map("student_id")
+  student   Student? @relation(fields: [studentId], references: [id])
+
+  recoveryEmail      String?   @map("recovery_email") // Ej: papa@gmail.com
+  resetCode          String?   @map("reset_code")
+  resetCodeExpiresAt DateTime? @map("reset_code_expires_at")
 
   @@map("users")
 }
@@ -364,6 +381,7 @@ model Student {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  user      User?
 }
 
 // 2. LA INSCRIPCIÓN (El evento Anual)
@@ -409,6 +427,7 @@ model Guardian {
   institution     String? // Nombre de la Institución
 
   students StudentGuardian[]
+  user     User?
 }
 
 // Tabla Pivote para relación Estudiante <-> Tutor

@@ -13,28 +13,30 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { LoginDto } from './dto/login.dto';
 import { SetupPasswordDto } from './dto/setup-password.dto';
+import { RegisterGuardianDto } from './dto/register-guardian.dto';
+import { RegisterStudentDto } from './dto/register-student.dto';
 
 @ApiTags('Autenticación')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @UseGuards(ThrottlerGuard) // Escudo anti-fuerza bruta activo
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // Regla: 5 intentos por minuto
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Inicia sesión y devuelve una Cookie segura' })
+  @ApiOperation({ summary: 'Inicia sesión (Soporta Web y App Móvil)' })
   async login(
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { access_token, ...result } = await this.authService.login(
+    const result = await this.authService.login(
       loginDto.email,
       loginDto.password,
     );
 
-    if (result.status === 'SUCCESS' && access_token) {
-      res.cookie('uecg_access_token', access_token, {
+    if (result.status === 'SUCCESS' && result.access_token) {
+      res.cookie('uecg_access_token', result.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
@@ -47,21 +49,18 @@ export class AuthController {
 
   @Post('setup-password')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Configura la clave definitiva y devuelve una Cookie segura',
-  })
+  @ApiOperation({ summary: 'Configura la clave definitiva' })
   async setupPassword(
     @Body() setupDto: SetupPasswordDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    // 🔥 AQUÍ ESTÁ EL CAMBIO: Pasamos setupToken en lugar de userId 🔥
-    const { access_token, ...result } = await this.authService.setupNewPassword(
+    const result = await this.authService.setupNewPassword(
       setupDto.setupToken,
       setupDto.newPassword,
     );
 
-    if (result.status === 'SUCCESS' && access_token) {
-      res.cookie('uecg_access_token', access_token, {
+    if (result.status === 'SUCCESS' && result.access_token) {
+      res.cookie('uecg_access_token', result.access_token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
@@ -78,5 +77,47 @@ export class AuthController {
   logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie('uecg_access_token');
     return { status: 'SUCCESS', message: 'Sesión cerrada exitosamente' };
+  }
+
+  @Post('register-guardian')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Auto-registro para padres desde la App Móvil' })
+  async registerGuardian(@Body() registerDto: RegisterGuardianDto) {
+    return this.authService.registerGuardian(registerDto);
+  }
+
+  @Post('register-student')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Auto-registro para alumnos desde la App Móvil' })
+  async registerStudent(@Body() registerDto: RegisterStudentDto) {
+    return this.authService.registerStudent(registerDto);
+  }
+
+  // =========================================================
+  // 🔥 NUEVOS: ENDPOINTS DE RECUPERACIÓN DE CONTRASEÑA
+  // =========================================================
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Envía un código OTP de 6 dígitos al correo de respaldo del usuario',
+  })
+  async forgotPassword(@Body('identifier') identifier: string) {
+    return this.authService.requestPasswordReset(identifier);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verifica el código OTP y cambia la contraseña' })
+  async resetPassword(
+    @Body('identifier') identifier: string,
+    @Body('code') code: string,
+    @Body('newPassword') newPassword: string,
+  ) {
+    return this.authService.resetPasswordWithCode(
+      identifier,
+      code,
+      newPassword,
+    );
   }
 }
