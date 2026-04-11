@@ -46,4 +46,10 @@ export class CreateClassroomDto {
   @IsUUID()
   @IsOptional()
   advisorId?: string;
+
+  // 🔥 NUEVO: Espacio Físico Base
+  @ApiProperty({ example: 'uuid-del-aula', required: false })
+  @IsUUID()
+  @IsOptional()
+  baseRoomId?: string;
 }

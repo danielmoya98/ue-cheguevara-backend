@@ -156,6 +156,9 @@ model Institution {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  // 🔥 NUEVO: Modo de asignación de horarios
+  schedulingMode SchedulingMode @default(FIXED_BASE) @map("scheduling_mode")
+
   @@map("institutions")
 }
 
@@ -228,6 +231,9 @@ model Classroom {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   scheduleSlots ScheduleSlot[]
   enrollments   Enrollment[]
+  // 🔥 NUEVO: Si la institución está en modo FIXED_BASE, este es su salón principal
+  baseRoomId    String?        @map("base_room_id")
+  baseRoom      PhysicalSpace? @relation("ClassroomBaseRoom", fields: [baseRoomId], references: [id])
 
   // REGLA DE ORO DE BASE DE DATOS:
   // No pueden existir dos "1ro A de Secundaria en la Mañana" en el mismo año.
@@ -289,6 +295,8 @@ model ScheduleSlot {
   teacherAssignment TeacherAssignment @relation(fields: [teacherAssignmentId], references: [id], onDelete: Cascade)
   classroom         Classroom         @relation(fields: [classroomId], references: [id], onDelete: Cascade)
   teacher           User              @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  physicalSpaceId   String?           @map("physical_space_id")
+  physicalSpace     PhysicalSpace?    @relation("SlotPhysicalSpace", fields: [physicalSpaceId], references: [id])
 
   // 🛡️ REGLA DE ORO 1: Un curso NO puede tener dos materias a la misma hora
   @@unique([classroomId, dayOfWeek, classPeriodId])
@@ -502,4 +510,39 @@ model RudeRecord {
   livesWith String? // "AMBOS", "PADRE", "MADRE", "TUTOR", "SOLO", "CENTRO_ACOGIDA"
 
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+}
+
+// ==========================================
+// NUEVOS ENUMS PARA GESTIÓN DE ESPACIOS
+// ==========================================
+enum SchedulingMode {
+  FIXED_BASE // Modelo Actual: Un aula base por curso + excepciones (Cancha/Lab)
+  DYNAMIC // Modelo Universitario: Cada materia puede tener un aula distinta
+}
+
+enum SpaceType {
+  SALON // Aula normal
+  LABORATORIO // Computación, Química, Física
+  CANCHA // Educación Física
+  AUDITORIO // Eventos
+  OTRO
+}
+
+// ==========================================
+// 🔥 NUEVA TABLA: ESPACIOS FÍSICOS
+// ==========================================
+model PhysicalSpace {
+  id       String    @id @default(uuid())
+  name     String // Ej. "Aula 101", "Cancha Principal"
+  type     SpaceType @default(SALON)
+  isActive Boolean   @default(true)
+
+  // Relaciones inversas
+  baseClassrooms Classroom[]    @relation("ClassroomBaseRoom")
+  scheduleSlots  ScheduleSlot[] @relation("SlotPhysicalSpace")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("physical_spaces")
 }

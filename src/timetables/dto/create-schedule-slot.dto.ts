@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsInt, Min, Max, IsUUID } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsInt,
+  Min,
+  Max,
+  IsUUID,
+  IsOptional,
+} from 'class-validator';
 
 export class CreateScheduleSlotDto {
   @ApiProperty({ description: 'Día de la semana (1 = Lunes, 5 = Viernes)' })
@@ -18,7 +25,6 @@ export class CreateScheduleSlotDto {
   @IsNotEmpty()
   teacherAssignmentId: string;
 
-  // Estos datos los inyecta el frontend para que la DB haga la validación cruzada
   @ApiProperty()
   @IsUUID()
   @IsNotEmpty()
@@ -28,4 +34,10 @@ export class CreateScheduleSlotDto {
   @IsUUID()
   @IsNotEmpty()
   teacherId: string;
+
+  // 🔥 NUEVO: El aula física donde se pasará la clase
+  @ApiProperty({ required: false })
+  @IsUUID()
+  @IsOptional()
+  physicalSpaceId?: string;
 }

@@ -9,6 +9,7 @@ import {
   Min,
   Max,
   IsArray,
+  IsOptional,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { EducationLevel, Shift } from '../../../prisma/generated/client';
@@ -17,6 +18,11 @@ class ClassroomItemDto {
   @IsString() @IsNotEmpty() grade: string;
   @IsString() @IsNotEmpty() section: string;
   @IsInt() @Min(10) @Max(50) capacity: number;
+
+  @ApiProperty({ example: 'uuid-del-aula', required: false })
+  @IsUUID()
+  @IsOptional()
+  baseRoomId?: string;
 }
 
 export class CreateBulkClassroomsDto {

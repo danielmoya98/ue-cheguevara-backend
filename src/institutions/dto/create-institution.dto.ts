@@ -15,6 +15,7 @@ import {
   Department,
   Shift,
   EducationLevel,
+  SchedulingMode, // 🔥 IMPORTACIÓN AÑADIDA
 } from '../../../prisma/generated/client';
 
 export class CreateInstitutionDto {
@@ -109,4 +110,15 @@ export class CreateInstitutionDto {
   @IsOptional()
   @IsUUID('4', { message: 'El ID del director debe ser un UUID válido' })
   directorId?: string;
+
+  // 🔥 NUEVO CAMPO AÑADIDO PARA EVITAR EL ERROR 400
+  @ApiPropertyOptional({
+    enum: SchedulingMode,
+    description: 'Modo de asignación de horarios (FIXED_BASE o DYNAMIC)',
+  })
+  @IsOptional()
+  @IsEnum(SchedulingMode, {
+    message: 'El modo de asignación de horarios no es válido',
+  })
+  schedulingMode?: SchedulingMode;
 }

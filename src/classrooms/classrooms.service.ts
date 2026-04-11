@@ -16,7 +16,6 @@ export class ClassroomsService {
   constructor(private prisma: PrismaService) {}
 
   async create(data: CreateClassroomDto) {
-    // 1. Validar que la gestión exista y NO esté cerrada
     const year = await this.prisma.academicYear.findUnique({
       where: { id: data.academicYearId },
     });
@@ -27,7 +26,6 @@ export class ClassroomsService {
       );
     }
 
-    // 2. Validar al Tutor (si se envía)
     if (data.advisorId) {
       const teacher = await this.prisma.user.findUnique({
         where: { id: data.advisorId },
@@ -39,14 +37,15 @@ export class ClassroomsService {
       }
     }
 
-    // 3. Crear el curso (Manejando la regla @@unique de Prisma)
     try {
       return await this.prisma.classroom.create({
         data,
-        include: { advisor: { select: { fullName: true } } }, // Devolvemos el nombre del tutor
+        include: {
+          advisor: { select: { fullName: true } },
+          baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+        },
       });
     } catch (error: any) {
-      // P2002 es el código de Prisma para violación de restricción única
       if (error.code === 'P2002') {
         throw new ConflictException(
           `El curso ${data.grade} ${data.section} de ${data.level} (${data.shift}) ya existe en esta gestión.`,
@@ -56,7 +55,6 @@ export class ClassroomsService {
     }
   }
 
-  // 🔥 Se añaden los nuevos parámetros opcionales
   async findAll(
     query: PaginationDto & {
       academicYearId?: string;
@@ -71,7 +69,6 @@ export class ClassroomsService {
     const { search, academicYearId, level, shift } = query;
 
     const whereCondition: any = {
-      // O Prisma.ClassroomWhereInput si aplicaste la mejora anterior
       ...(academicYearId && { academicYearId }),
       ...(level && { level }),
       ...(shift && { shift }),
@@ -93,13 +90,11 @@ export class ClassroomsService {
         include: {
           advisor: { select: { id: true, fullName: true } },
           academicYear: { select: { year: true, status: true } },
-
-          // 🔥 AQUÍ ESTÁ LA SOLUCIÓN AL CONTADOR FANTASMA
+          baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
           _count: {
             select: {
               enrollments: {
                 where: {
-                  // Solo contamos a los alumnos que ocupan un asiento físico o virtual
                   status: {
                     in: ['INSCRITO', 'REVISION_SIE', 'OBSERVADO'],
                   },
@@ -120,7 +115,10 @@ export class ClassroomsService {
   async findOne(id: string) {
     const classroom = await this.prisma.classroom.findUnique({
       where: { id },
-      include: { advisor: { select: { id: true, fullName: true } } },
+      include: {
+        advisor: { select: { id: true, fullName: true } },
+        baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+      },
     });
     if (!classroom) throw new NotFoundException('Curso no encontrado');
     return classroom;
@@ -141,12 +139,12 @@ export class ClassroomsService {
       grade: c.grade,
       section: c.section,
       capacity: c.capacity,
+      baseRoomId: c.baseRoomId || null, // 🔥 Añadido aquí
     }));
 
-    // Prisma hace un solo INSERT masivo ultra rápido
     const result = await this.prisma.classroom.createMany({
       data: payload,
-      skipDuplicates: true, // Ignora silenciosamente si ya existe (Ej: Primero A ya estaba creado)
+      skipDuplicates: true,
     });
 
     return {
@@ -156,7 +154,7 @@ export class ClassroomsService {
   }
 
   async update(id: string, data: UpdateClassroomDto) {
-    await this.findOne(id); // Validamos que exista
+    await this.findOne(id);
 
     if (data.advisorId) {
       const teacher = await this.prisma.user.findUnique({
@@ -173,7 +171,10 @@ export class ClassroomsService {
       return await this.prisma.classroom.update({
         where: { id },
         data,
-        include: { advisor: { select: { fullName: true } } },
+        include: {
+          advisor: { select: { fullName: true } },
+          baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+        },
       });
     } catch (error: any) {
       if (error.code === 'P2002') {
@@ -187,7 +188,6 @@ export class ClassroomsService {
 
   async remove(id: string) {
     await this.findOne(id);
-    // TODO en el futuro: Validar que no tenga estudiantes inscritos antes de borrar
     await this.prisma.classroom.delete({ where: { id } });
     return { message: 'Curso eliminado correctamente' };
   }

@@ -17,6 +17,7 @@ import { BullModule } from '@nestjs/bullmq'; // <-- IMPORTACIÓN NUEVA
 import { StudentsModule } from './students/students.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     TimetablesModule,
     StudentsModule,
     EnrollmentsModule,
+    PhysicalSpacesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

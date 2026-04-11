@@ -18,17 +18,12 @@ import * as path from 'path';
 export class TimetablesService implements OnModuleInit {
   constructor(
     private prisma: PrismaService,
-    // Inyectamos la cola
     @InjectQueue('export-queue') private exportQueue: Queue,
   ) {}
 
   async onModuleInit() {
     await this.seedMorningPeriods();
   }
-
-  // ==============================================
-  // 1. ENDPOINTS DE LA CUADRÍCULA
-  // ==============================================
 
   async getPeriods(shift: Shift) {
     return this.prisma.classPeriod.findMany({
@@ -47,6 +42,8 @@ export class TimetablesService implements OnModuleInit {
             teacher: { select: { id: true, fullName: true } },
           },
         },
+        // 🔥 TRAEMOS EL ESPACIO FÍSICO
+        physicalSpace: { select: { id: true, name: true } },
       },
     });
   }
@@ -84,10 +81,6 @@ export class TimetablesService implements OnModuleInit {
     return { message: 'Casillero liberado exitosamente' };
   }
 
-  // ==============================================
-  // 2. EXPORTACIÓN INDIVIDUAL (Síncrona)
-  // ==============================================
-
   async exportSinglePdf(classroomId: string, res: Response) {
     const classroom = await this.prisma.classroom.findUnique({
       where: { id: classroomId },
@@ -112,7 +105,12 @@ export class TimetablesService implements OnModuleInit {
             const parts = slot.teacherAssignment.teacher.fullName.split(' ');
             const name =
               parts.length > 1 ? `${parts[0]} ${parts[1]}` : parts[0];
-            tableRowsHtml += `<td class="slot-cell"><strong>${slot.teacherAssignment.subject.name}</strong><br/><span style="font-size: 10px;">Prof. ${name}</span></td>`;
+            // 🔥 AÑADIMOS EL AULA FÍSICA AL PDF (Si la tiene)
+            const roomHtml = slot.physicalSpace
+              ? `<br/><span style="font-size: 9px; color: #64748b;">📍 ${slot.physicalSpace.name}</span>`
+              : '';
+
+            tableRowsHtml += `<td class="slot-cell"><strong>${slot.teacherAssignment.subject.name}</strong><br/><span style="font-size: 10px;">Prof. ${name}</span>${roomHtml}</td>`;
           } else {
             tableRowsHtml += `<td class="slot-cell"></td>`;
           }
@@ -158,12 +156,7 @@ export class TimetablesService implements OnModuleInit {
     res.end(Buffer.from(pdf));
   }
 
-  // ==============================================
-  // 3. EXPORTACIÓN MASIVA (Asíncrona via BullMQ)
-  // ==============================================
-
   async requestMassiveZip(academicYearId: string) {
-    // Añadimos a la cola
     await this.exportQueue.add('generate-massive-zip', { academicYearId });
     return {
       message: 'Generación iniciada en segundo plano.',
@@ -173,24 +166,17 @@ export class TimetablesService implements OnModuleInit {
 
   async downloadZip(fileName: string, res: Response) {
     const filePath = path.join(process.cwd(), 'temp-exports', fileName);
-
     if (!fs.existsSync(filePath)) {
       throw new NotFoundException('El archivo ya no existe o expiró.');
     }
-
     res.set({
       'Content-Type': 'application/zip',
       'Content-Disposition': `attachment; filename="${fileName}"`,
     });
-
     const fileStream = fs.createReadStream(filePath);
     fileStream.pipe(res);
-
   }
 
-  // ==============================================
-  // SEEDER
-  // ==============================================
   private async seedMorningPeriods() {
     const existing = await this.prisma.classPeriod.count({
       where: { shift: Shift.MANANA },
@@ -279,5 +265,15 @@ export class TimetablesService implements OnModuleInit {
       },
     ];
     await this.prisma.classPeriod.createMany({ data: periods });
+  }
+
+  async updateSlotSpace(id: string, physicalSpaceId: string | null) {
+    const slot = await this.prisma.scheduleSlot.findUnique({ where: { id } });
+    if (!slot) throw new NotFoundException('Casillero no encontrado');
+
+    return this.prisma.scheduleSlot.update({
+      where: { id },
+      data: { physicalSpaceId },
+    });
   }
 }

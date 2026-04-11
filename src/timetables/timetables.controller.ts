@@ -11,6 +11,7 @@ import {
   HttpStatus,
   UseInterceptors,
   Res,
+  Patch,
 } from '@nestjs/common';
 import { TimetablesService } from './timetables.service';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
@@ -89,5 +90,17 @@ export class TimetablesController {
     @Res() res: express.Response,
   ) {
     return this.timetablesService.downloadZip(fileName, res);
+  }
+
+  @Patch('slot/:id/space')
+  @Roles(Role.ADMIN)
+  @ApiOperation({
+    summary: 'Cambia el aula física de una materia específica en el horario',
+  })
+  async updateSlotSpace(
+    @Param('id') id: string,
+    @Body('physicalSpaceId') physicalSpaceId: string | null,
+  ) {
+    return this.timetablesService.updateSlotSpace(id, physicalSpaceId);
   }
 }
