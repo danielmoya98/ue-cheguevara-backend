@@ -318,7 +318,7 @@ enum EnrollmentStatus {
   REVISION_SIE // Esperando que el director valide el RUDE en el Ministerio
   INSCRITO // Oficialmente activo en el curso
   RETIRADO // Abandonó el colegio a medio año
-  TRASPASO // Se trasladó a otra unidad educativa
+  TRASLADO // Se trasladó a otra unidad educativa
   RECHAZADO // 👈 ¡Faltaba este para la acción de la secretaria!
   OBSERVADO // (Opcional) Por si le falta algún documento
 }
@@ -411,6 +411,9 @@ model Enrollment {
 
   // El Formulario RUDE está anclado a esta inscripción anual
   rudeRecord RudeRecord?
+
+  // 🔥 NUEVO: Campo JSON para guardar el checklist de documentos físicos
+  receivedDocuments Json? @map("received_documents")
 
   // Regla de Negocio: Un estudiante NO puede inscribirse dos veces en el mismo año
   @@unique([studentId, academicYearId])

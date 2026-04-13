@@ -275,6 +275,7 @@ export class EnrollmentsService {
   }
 
   // (Intacto)
+  // 🔥 MÉTODO ACTUALIZADO: Obtiene detalles + Detección de Hermanos
   async findOne(id: string) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
@@ -286,7 +287,27 @@ export class EnrollmentsService {
           include: {
             guardians: {
               include: {
-                guardian: true,
+                guardian: {
+                  include: {
+                    // 🔥 Buscamos a todos los estudiantes de este tutor
+                    students: {
+                      include: {
+                        student: {
+                          include: {
+                            // Traemos su inscripción actual para saber en qué curso está el hermano
+                            enrollments: {
+                              where: {
+                                academicYear: { status: 'ACTIVE' },
+                                status: 'INSCRITO',
+                              },
+                              include: { classroom: true },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -300,12 +321,47 @@ export class EnrollmentsService {
       );
     }
 
-    return { data: enrollment };
-  }
+    // =========================================================
+    // 🧬 ALGORITMO DE EXTRACCIÓN DE HERMANOS
+    // =========================================================
+    const siblingsMap = new Map();
 
-  // (Intacto y Seguro)
+    if (enrollment.student.guardians) {
+      enrollment.student.guardians.forEach((sg) => {
+        sg.guardian.students.forEach((siblingLink) => {
+          const sibling = siblingLink.student;
+
+          // Excluimos al propio estudiante que estamos consultando
+          if (sibling.id !== enrollment.studentId) {
+            const activeEnrollment = sibling.enrollments[0]; // Su inscripción de este año (si la tiene)
+
+            // Usamos un Map para evitar duplicados (por si comparten padre y madre)
+            siblingsMap.set(sibling.id, {
+              id: sibling.id,
+              names:
+                `${sibling.names} ${sibling.lastNamePaterno} ${sibling.lastNameMaterno || ''}`.trim(),
+              ci: sibling.ci || 'Sin CI',
+              // Mostramos el curso del hermano, o avisamos si no está inscrito este año
+              classroom: activeEnrollment
+                ? `${activeEnrollment.classroom.grade} "${activeEnrollment.classroom.section}" - ${activeEnrollment.classroom.level}`
+                : 'No inscrito en la gestión actual',
+              sharedTutor: `${sg.guardian.names} ${sg.guardian.lastNamePaterno}`,
+            });
+          }
+        });
+      });
+    }
+
+    const siblings = Array.from(siblingsMap.values());
+
+    // Retornamos la data completa + el arreglo de hermanos limpios
+    return { data: { ...enrollment, siblings } };
+  }
+  // (Intacto y Seguro, pero con la nueva regla del RUDE)
   async update(id: string, updateEnrollmentDto: UpdateEnrollmentDto) {
-    const { status, rudeCode, ...restData } = updateEnrollmentDto;
+    // 1. Extraemos receivedDocuments del DTO
+    const { status, rudeCode, receivedDocuments, ...restData } =
+      updateEnrollmentDto;
 
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
@@ -316,24 +372,28 @@ export class EnrollmentsService {
       throw new NotFoundException(`La inscripción con ID ${id} no existe.`);
     }
 
+    // =========================================================
+    // 🔥 LA REGLA MAESTRA DEL CÓDIGO RUDE
+    // =========================================================
     if (status === 'INSCRITO') {
-      if (
-        enrollment.enrollmentType === 'NUEVO' ||
-        enrollment.enrollmentType === 'TRASPASO'
-      ) {
-        if (!rudeCode && !enrollment.student.rudeCode) {
-          throw new BadRequestException(
-            `Operación denegada: No se puede finalizar la inscripción de un estudiante ${enrollment.enrollmentType} sin registrar su Código RUDE oficial.`,
-          );
-        }
+      // Tomamos el código que mandó la secretaria, o el que ya tenía el alumno
+      const finalRudeCode = rudeCode || enrollment.student.rudeCode;
+
+      // Si NO es alumno Antiguo y NO tiene código RUDE, bloqueamos la inscripción
+      if (enrollment.enrollmentType !== 'ANTIGUO' && !finalRudeCode) {
+        throw new BadRequestException(
+          `Operación denegada: Debe registrar el Código RUDE oficial del estudiante para finalizar su inscripción como ${enrollment.enrollmentType}.`,
+        );
       }
     }
 
     return await this.prisma.$transaction(async (tx) => {
+      // 2. Actualizamos la inscripción
       const updatedEnrollment = await tx.enrollment.update({
         where: { id },
         data: {
           ...(status && { status }),
+          ...(receivedDocuments && { receivedDocuments }), // 🔥 Guardamos el JSON de documentos en la BD
           ...restData,
         },
         include: {
@@ -342,18 +402,19 @@ export class EnrollmentsService {
         },
       });
 
+      // 3. Si mandaron un RUDE nuevo, actualizamos el perfil inmutable del estudiante
       if (rudeCode) {
         await tx.student.update({
           where: { id: enrollment.studentId },
           data: { rudeCode },
         });
+        // Mutamos el objeto de respuesta para que el frontend tenga el dato fresco
         updatedEnrollment.student.rudeCode = rudeCode;
       }
 
       return updatedEnrollment;
     });
   }
-
   remove(id: string) {
     return `This action removes a #${id} enrollment`;
   }

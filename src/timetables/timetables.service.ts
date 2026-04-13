@@ -10,9 +10,11 @@ import { Shift } from '../../prisma/generated/client';
 import { Response } from 'express';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import puppeteer from 'puppeteer';
 import * as fs from 'fs';
 import * as path from 'path';
+import { renderToStream } from '@react-pdf/renderer';
+import { TimetableTemplate } from './templates/timetable.template';
+import React from 'react';
 
 @Injectable()
 export class TimetablesService implements OnModuleInit {
@@ -91,69 +93,18 @@ export class TimetablesService implements OnModuleInit {
     const periods = await this.getPeriods(classroom.shift);
     const slots = await this.getClassroomSchedule(classroomId);
 
-    let tableRowsHtml = '';
-    for (const p of periods) {
-      tableRowsHtml += `<tr><td class="${p.isBreak ? 'break-time' : 'time-cell'}"><strong>${p.name}</strong><br/><span style="font-size: 10px; color: #555;">${p.startTime} - ${p.endTime}</span></td>`;
-      for (let day = 1; day <= 5; day++) {
-        if (p.isBreak) {
-          tableRowsHtml += `<td class="break-cell">${day === 3 ? 'R E C R E O' : ''}</td>`;
-        } else {
-          const slot = slots.find(
-            (s) => s.dayOfWeek === day && s.classPeriodId === p.id,
-          );
-          if (slot) {
-            const parts = slot.teacherAssignment.teacher.fullName.split(' ');
-            const name =
-              parts.length > 1 ? `${parts[0]} ${parts[1]}` : parts[0];
-            // 🔥 AÑADIMOS EL AULA FÍSICA AL PDF (Si la tiene)
-            const roomHtml = slot.physicalSpace
-              ? `<br/><span style="font-size: 9px; color: #64748b;">📍 ${slot.physicalSpace.name}</span>`
-              : '';
-
-            tableRowsHtml += `<td class="slot-cell"><strong>${slot.teacherAssignment.subject.name}</strong><br/><span style="font-size: 10px;">Prof. ${name}</span>${roomHtml}</td>`;
-          } else {
-            tableRowsHtml += `<td class="slot-cell"></td>`;
-          }
-        }
-      }
-      tableRowsHtml += `</tr>`;
-    }
-
-    const htmlContent = `
-      <!DOCTYPE html><html><head><meta charset="utf-8"><style>
-        body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; margin: 0; padding: 20px; color: #333; }
-        .header { text-align: center; margin-bottom: 20px; } .title { font-size: 22px; font-weight: 900; margin: 0; }
-        .subtitle { font-size: 16px; font-weight: bold; margin: 5px 0; color: #2563eb; } .info { font-size: 12px; color: #666; font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; } th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: center; }
-        th { background-color: #1e3a8a; color: white; font-size: 12px; } .time-cell { background-color: #f8fafc; font-size: 12px; width: 120px; }
-        .break-time { background-color: #e2e8f0; font-size: 12px; width: 120px; color: #64748b; } .break-cell { background-color: #f1f5f9; color: #94a3b8; font-weight: 900; letter-spacing: 3px; font-size: 14px; }
-        .slot-cell { font-size: 12px; background-color: #ffffff; }
-      </style></head><body>
-        <div class="header"><h1 class="title">UNIDAD EDUCATIVA "ERNESTO CHE GUEVARA"</h1><h2 class="subtitle">HORARIO ESCOLAR - ${classroom.grade} "${classroom.section}" (${classroom.level})</h2><p class="info">Turno: ${classroom.shift} | Gestión: ${classroom.academicYear.year}</p></div>
-        <table><thead><tr><th>PERIODO</th><th>LUNES</th><th>MARTES</th><th>MIÉRCOLES</th><th>JUEVES</th><th>VIERNES</th></tr></thead><tbody>${tableRowsHtml}</tbody></table>
-      </body></html>
-    `;
-
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-    const page = await browser.newPage();
-    await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
-    const pdf = await page.pdf({
-      format: 'A4',
-      landscape: true,
-      printBackground: true,
-      margin: { top: '10mm', bottom: '10mm', left: '10mm', right: '10mm' },
-    });
-    await browser.close();
+    // 🔥 2. Generamos el stream del PDF de forma nativa
+    const pdfStream = await renderToStream(
+      React.createElement(TimetableTemplate, { classroom, periods, slots }),
+    );
 
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Horario_${classroom.grade}_${classroom.section}.pdf"`,
-      'Content-Length': pdf.length.toString(),
     });
-    res.end(Buffer.from(pdf));
+
+    // 3. Enviamos el stream al cliente (Súper eficiente en memoria)
+    pdfStream.pipe(res);
   }
 
   async requestMassiveZip(academicYearId: string) {
