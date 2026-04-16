@@ -27,8 +27,10 @@ async function bootstrap() {
 
   app.enableCors({
     origin: allowedOrigins,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS', // Asegúrate de incluir OPTIONS
     credentials: true,
+    // 🔥 ESTAS CABECERAS SON CLAVES PARA QUE EL NAVEGADOR ACEPTE LA COOKIE DEL BACKEND
+    exposedHeaders: ['set-cookie'],
   });
 
   app.setGlobalPrefix('api');
