@@ -7,6 +7,7 @@ import { CreateInstitutionDto } from './dto/create-institution.dto';
 import { UpdateInstitutionDto } from './dto/update-institution.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { PaginationDto } from '../common/dto/pagination.dto';
+import { NotificationChannel } from '../../prisma/generated/client';
 
 @Injectable()
 export class InstitutionsService {
@@ -89,5 +90,67 @@ export class InstitutionsService {
       data: updateData,
     });
     return { data: updated, message: 'Datos institucionales actualizados' };
+  }
+
+  async getCampaignSettings() {
+    // Como tu sistema maneja principalmente una institución a la vez (Single-Tenant), buscamos la primera
+    const institution = await this.prisma.institution.findFirst({
+      select: {
+        enableDigitalRudeUpdates: true,
+        maxRudeUpdatesPerYear: true,
+        activeNotificationChannels: true,
+      },
+    });
+
+    if (!institution) {
+      throw new NotFoundException(
+        'No se encontró la configuración de la Institución.',
+      );
+    }
+
+    return { data: institution };
+  }
+
+  async updateCampaignSettings(data: {
+    enableDigitalRudeUpdates?: boolean;
+    maxRudeUpdatesPerYear?: number;
+    activeNotificationChannels?: string[];
+  }) {
+    const institution = await this.prisma.institution.findFirst();
+
+    if (!institution) {
+      throw new NotFoundException(
+        'No se encontró la configuración de la Institución.',
+      );
+    }
+
+    // Solo mapeamos los canales si el frontend realmente los envió
+    let channels;
+    if (data.activeNotificationChannels) {
+      channels = data.activeNotificationChannels.map(
+        (channel) =>
+          NotificationChannel[channel as keyof typeof NotificationChannel],
+      );
+    }
+
+    const updated = await this.prisma.institution.update({
+      where: { id: institution.id },
+      data: {
+        // Prisma es inteligente: si le pasas 'undefined', simplemente ignora el campo y no lo sobreescribe
+        enableDigitalRudeUpdates: data.enableDigitalRudeUpdates,
+        maxRudeUpdatesPerYear: data.maxRudeUpdatesPerYear,
+        activeNotificationChannels: channels,
+      },
+      select: {
+        enableDigitalRudeUpdates: true,
+        maxRudeUpdatesPerYear: true,
+        activeNotificationChannels: true,
+      },
+    });
+
+    return {
+      data: updated,
+      message: 'Configuración de la Campaña RUDE actualizada exitosamente',
+    };
   }
 }

@@ -18,7 +18,9 @@ import { StudentsModule } from './students/students.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
-
+import { DataUpdatesModule } from './data-updates/data-updates.module';
+import { FirebaseModule } from './firebase/firebase.module'; // 🔥 IMPORTACIÓN NUEVA
+import { GuardiansModule } from './guardians/guardians.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
@@ -33,8 +35,7 @@ import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
       isGlobal: true,
       useFactory: async () => ({
         store: await redisStore({
-          url: 'redis://localhost:6379',
-          ttl: 60000,
+          url: process.env.REDIS_URL,
         }),
       }),
     }),
@@ -42,12 +43,11 @@ import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
     // 🔥 NUEVO: Conexión Global a Redis para las Colas de BullMQ
     BullModule.forRoot({
       connection: {
-        host: 'localhost',
-        port: 6379,
+        url: process.env.REDIS_URL,
       },
     }),
-
     PrismaModule,
+    FirebaseModule,
     UsersModule,
     AuthModule,
     InstitutionsModule,
@@ -59,6 +59,8 @@ import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
     StudentsModule,
     EnrollmentsModule,
     PhysicalSpacesModule,
+    DataUpdatesModule,
+    GuardiansModule,
   ],
   controllers: [AppController],
   providers: [AppService],

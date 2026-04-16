@@ -28,6 +28,7 @@ import {
 
 // Mantenemos el import type que le gusta a TypeScript
 import type { Cache } from 'cache-manager';
+import { UpdateCampaignSettingsDto } from './dto/update-campaign-settings.dto';
 
 @ApiTags('Institución (RUE)')
 @ApiCookieAuth('uecg_access_token')
@@ -38,6 +39,26 @@ export class InstitutionsController {
     private readonly institutionsService: InstitutionsService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
   ) {}
+
+  @Get('campaign-settings')
+  @ApiOperation({ summary: 'Obtiene el estado actual de la campaña RUDE' })
+  // No le ponemos CacheInterceptor para que la Directora vea el estado real al instante
+  getCampaignSettings() {
+    return this.institutionsService.getCampaignSettings();
+  }
+
+  @Patch('campaign-settings')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Actualiza la configuración de la campaña RUDE' })
+  async updateCampaignSettings(
+    @Body() body: UpdateCampaignSettingsDto, // 🔥 AQUÍ ESTÁ LA MAGIA
+  ) {
+    const result = await this.institutionsService.updateCampaignSettings(body);
+
+    await this.cacheManager.clear();
+
+    return result;
+  }
 
   @Post()
   @Roles(Role.ADMIN)

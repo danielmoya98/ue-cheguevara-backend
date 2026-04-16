@@ -7,16 +7,30 @@ import {
   UseInterceptors,
   UploadedFile,
   Param,
+  Patch,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { StudentsService } from './students.service';
 import { CreateFullRudeDto } from './dto/create-student.dto';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiConsumes,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
+import { AuthGuard } from '@nestjs/passport';
+import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('Inscripciones y RUDE')
 @Controller('students')
 export class StudentsController {
-  constructor(private readonly studentsService: StudentsService) {}
+  constructor(
+    private readonly studentsService: StudentsService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Post('register-rude')
   @HttpCode(HttpStatus.CREATED)
@@ -56,5 +70,33 @@ export class StudentsController {
       globalStatus,
       classroomId,
     );
+  }
+
+  // 🔥 NUEVO: Recibe el token de FCM desde Flutter
+  @Patch('fcm-token')
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard('jwt')) // Solo accesible desde la app con token Bearer
+  @ApiOperation({
+    summary: 'Registra el dispositivo móvil para notificaciones Push',
+  })
+  async updateFcmToken(@Req() req, @Body('token') fcmToken: string) {
+    const userId = req.user.sub;
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return { status: 'ERROR', message: 'Usuario no encontrado' };
+
+    // Usamos Set para no guardar tokens duplicados si el padre desinstala e instala la app
+    const tokens = new Set(user.fcmTokens || []);
+    tokens.add(fcmToken);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { fcmTokens: Array.from(tokens) },
+    });
+
+    return {
+      status: 'SUCCESS',
+      message: 'Dispositivo vinculado correctamente',
+    };
   }
 }

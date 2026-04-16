@@ -118,6 +118,8 @@ model User {
   resetCode          String?   @map("reset_code")
   resetCodeExpiresAt DateTime? @map("reset_code_expires_at")
 
+  fcmTokens String[] @map("fcm_tokens")
+
   @@map("users")
 }
 
@@ -158,6 +160,11 @@ model Institution {
 
   // 🔥 NUEVO: Modo de asignación de horarios
   schedulingMode SchedulingMode @default(FIXED_BASE) @map("scheduling_mode")
+
+  // 🔥 FASE 1: Configuración de Campaña RUDE
+  enableDigitalRudeUpdates   Boolean               @default(false) @map("enable_digital_updates")
+  maxRudeUpdatesPerYear      Int                   @default(2) @map("max_rude_updates_per_year")
+  activeNotificationChannels NotificationChannel[] @default([PUSH_APP]) @map("active_notification_channels")
 
   @@map("institutions")
 }
@@ -415,6 +422,10 @@ model Enrollment {
   // 🔥 NUEVO: Campo JSON para guardar el checklist de documentos físicos
   receivedDocuments Json? @map("received_documents")
 
+  // 🔥 FASE 1: Tracking de Actualizaciones
+  rudeUpdateCount Int                 @default(0) @map("rude_update_count")
+  updateRequests  DataUpdateRequest[]
+
   // Regla de Negocio: Un estudiante NO puede inscribirse dos veces en el mismo año
   @@unique([studentId, academicYearId])
 }
@@ -548,4 +559,43 @@ model PhysicalSpace {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("physical_spaces")
+}
+
+// ==========================================
+// NUEVOS ENUMS PARA ACTUALIZACIÓN RUDE
+// ==========================================
+
+enum NotificationChannel {
+  PUSH_APP
+  WHATSAPP
+  EMAIL
+}
+
+enum UpdateRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// 🔥 FASE 1: NUEVA TABLA DE CUARENTENA
+model DataUpdateRequest {
+  id           String @id @default(uuid())
+  enrollmentId String @map("enrollment_id")
+
+  // Guardamos el objeto íntegro del formulario enviado por el padre
+  proposedData Json @map("proposed_data")
+
+  status UpdateRequestStatus @default(PENDING)
+
+  // Auditoría
+  createdAt       DateTime  @default(now()) @map("created_at")
+  reviewedAt      DateTime? @map("reviewed_at")
+  rejectionReason String?   @map("rejection_reason")
+
+  enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  // 🛡️ REGLA DE SEGURIDAD: Solo una solicitud pendiente por alumno a la vez
+  // Si envían otra, el backend debe hacer un UPSERT o rechazar si ya hay una PENDING.
+  @@unique([enrollmentId, status])
+  @@map("data_update_requests")
 }

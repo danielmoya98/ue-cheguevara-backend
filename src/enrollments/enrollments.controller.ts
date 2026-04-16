@@ -8,6 +8,7 @@ import {
   Delete,
   Query,
   UseGuards,
+  Res,
 } from '@nestjs/common';
 import { EnrollmentsService } from './enrollments.service';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
@@ -77,5 +78,23 @@ export class EnrollmentsController {
   @Roles(Role.ADMIN)
   remove(@Param('id') id: string) {
     return this.enrollmentsService.remove(id);
+  }
+
+  @Get(':id/rude-pdf')
+  @ApiCookieAuth('uecg_access_token')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @ApiOperation({ summary: 'Genera el PDF oficial del RUDE para el SIE' })
+  async generateRudePdf(@Param('id') id: string, @Res() res: Response) {
+    // 🚧 AQUÍ EN EL FUTURO:
+    // const data = await this.enrollmentsService.getKardex(id);
+    // const pdfBuffer = await this.pdfService.generateRude(data);
+
+    // POR AHORA: Retornamos un estado para indicar que la arquitectura está lista
+    return {
+      status: 'READY_FOR_INTEGRATION',
+      message:
+        'El endpoint está construido. Requiere inyectar el motor de plantillas PDF para el formato SIE.',
+    };
   }
 }
