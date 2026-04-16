@@ -35,17 +35,17 @@ import { GuardiansModule } from './guardians/guardians.module';
       isGlobal: true,
       useFactory: async () => ({
         store: await redisStore({
-          url: 'redis://localhost:6379',
+          // Usa la variable de entorno, o cae a localhost si estás en tu PC
+          url: process.env.REDIS_URL || 'redis://localhost:6379',
           ttl: 60000,
         }),
       }),
     }),
 
-    // 🔥 NUEVO: Conexión Global a Redis para las Colas de BullMQ
     BullModule.forRoot({
       connection: {
-        host: 'localhost',
-        port: 6379,
+        // Usa directamente la URL de conexión que provee Upstash
+        url: process.env.REDIS_URL || 'redis://localhost:6379',
       },
     }),
 
