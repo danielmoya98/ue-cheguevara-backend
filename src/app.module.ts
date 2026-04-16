@@ -13,13 +13,13 @@ import { ClassroomsModule } from './classrooms/classrooms.module';
 import { SubjectsModule } from './subjects/subjects.module';
 import { TeacherAssignmentsModule } from './teacher-assignments/teacher-assignments.module';
 import { TimetablesModule } from './timetables/timetables.module';
-import { BullModule } from '@nestjs/bullmq';
+import { BullModule } from '@nestjs/bullmq'; // <-- IMPORTACIÓN NUEVA
 import { StudentsModule } from './students/students.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
 import { DataUpdatesModule } from './data-updates/data-updates.module';
-import { FirebaseModule } from './firebase/firebase.module';
+import { FirebaseModule } from './firebase/firebase.module'; // 🔥 IMPORTACIÓN NUEVA
 import { GuardiansModule } from './guardians/guardians.module';
 @Module({
   imports: [
@@ -35,7 +35,8 @@ import { GuardiansModule } from './guardians/guardians.module';
       isGlobal: true,
       useFactory: async () => ({
         store: await redisStore({
-          url: process.env.REDIS_URL,
+          url: 'redis://localhost:6379',
+          ttl: 60000,
         }),
       }),
     }),
@@ -43,9 +44,11 @@ import { GuardiansModule } from './guardians/guardians.module';
     // 🔥 NUEVO: Conexión Global a Redis para las Colas de BullMQ
     BullModule.forRoot({
       connection: {
-        url: process.env.REDIS_URL,
+        host: 'localhost',
+        port: 6379,
       },
     }),
+
     PrismaModule,
     FirebaseModule,
     UsersModule,

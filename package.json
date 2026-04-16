@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "build": "node node_modules/@nestjs/cli/bin/nest.js build",
+    "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
     "start:dev": "nest start --watch",
@@ -14,8 +14,6 @@
     "start:prod": "node dist/main",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
-    "postinstall": "prisma generate",
-    "start:render": "npx prisma migrate deploy && node dist/main.js",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
@@ -58,10 +56,10 @@
     "socket.io": "^4.8.3",
     "swagger-ui-express": "^5.0.1",
     "xlsx": "^0.18.5",
-    "zod": "^4.3.6",
-    "@nestjs/cli": "^11.0.16"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@nestjs/cli": "^11.0.16",
     "@nestjs/schematics": "^11.0.9",
     "@nestjs/testing": "^11.1.13",
     "@types/archiver": "^7.0.0",
