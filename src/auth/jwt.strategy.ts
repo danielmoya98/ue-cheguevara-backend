@@ -1,21 +1,27 @@
-import { Strategy } from 'passport-jwt';
+import { Strategy, ExtractJwt } from 'passport-jwt'; // <-- Asegúrate de importar ExtractJwt
 import { PassportStrategy } from '@nestjs/passport';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Request } from 'express'; // <-- Importamos Request
+import { Request } from 'express';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(private prisma: PrismaService) {
     super({
-      // 1. AHORA EXTRAE EL TOKEN DIRECTAMENTE DE LA COOKIE
-      jwtFromRequest: (req: Request) => {
-        let token = null;
-        if (req && req.cookies) {
-          token = req.cookies['uecg_access_token'];
-        }
-        return token;
-      },
+      // 🔥 EL ARREGLO BILINGÜE: Soporta Flutter y Web simultáneamente
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        // 1. Prioridad 1: Busca en las cabeceras (Para la App Móvil Flutter)
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+
+        // 2. Prioridad 2: Si no hay cabecera, busca en las cookies (Para Web/Next.js)
+        (req: Request) => {
+          let token = null;
+          if (req && req.cookies) {
+            token = req.cookies['uecg_access_token'];
+          }
+          return token;
+        },
+      ]),
       ignoreExpiration: false,
       secretOrKey: process.env.JWT_SECRET || 'super_secreto_uecg_2026',
     });
