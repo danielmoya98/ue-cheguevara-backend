@@ -13,13 +13,13 @@ import { ClassroomsModule } from './classrooms/classrooms.module';
 import { SubjectsModule } from './subjects/subjects.module';
 import { TeacherAssignmentsModule } from './teacher-assignments/teacher-assignments.module';
 import { TimetablesModule } from './timetables/timetables.module';
-import { BullModule } from '@nestjs/bullmq'; // <-- IMPORTACIÓN NUEVA
+import { BullModule } from '@nestjs/bullmq';
 import { StudentsModule } from './students/students.module';
 import { EnrollmentsModule } from './enrollments/enrollments.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
 import { DataUpdatesModule } from './data-updates/data-updates.module';
-import { FirebaseModule } from './firebase/firebase.module'; // 🔥 IMPORTACIÓN NUEVA
+import { FirebaseModule } from './firebase/firebase.module';
 import { GuardiansModule } from './guardians/guardians.module';
 @Module({
   imports: [
