@@ -15,24 +15,41 @@ async function bootstrap() {
   app.use(cookieParser());
   app.use(helmet());
 
-  // 🔥 ORIGEN DINÁMICO: Lee desde la variable de entorno o usa localhost en desarrollo
-  const allowedOrigins = process.env.FRONTEND_URL
-    ? process.env.FRONTEND_URL.split(',')
-    : [
+  // ==================================================
+  // 🔥 SEGURIDAD Y CORS (Configuración Dinámica)
+  // ==================================================
+  app.enableCors({
+    origin: function (origin, callback) {
+      // 1. Definimos los orígenes base (desarrollo y red local)
+      const allowedOrigins = [
         'http://localhost:3000',
         'http://localhost:3001',
         'http://192.168.1.11:3000',
         'http://192.168.1.11:3001',
       ];
 
-  app.enableCors({
-    origin: allowedOrigins,
-    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS', // Asegúrate de incluir OPTIONS
+      // 2. Si existe la variable en Render, la inyectamos a la lista
+      if (process.env.FRONTEND_URL) {
+        allowedOrigins.push(...process.env.FRONTEND_URL.split(','));
+      }
+
+      // 3. Lógica dinámica:
+      // Si no hay origen (Postman/Móvil) o el origen está en nuestra lista,
+      // le devolvemos ESE origen exacto al navegador para cumplir con 'credentials: true'
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, origin);
+      } else {
+        callback(new Error('No permitido por CORS'));
+      }
+    },
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
-    // 🔥 ESTAS CABECERAS SON CLAVES PARA QUE EL NAVEGADOR ACEPTE LA COOKIE DEL BACKEND
     exposedHeaders: ['set-cookie'],
   });
 
+  // ==================================================
+  // ARQUITECTURA Y ESTÁNDARES
+  // ==================================================
   app.setGlobalPrefix('api');
   app.enableVersioning({
     type: VersioningType.URI,
@@ -50,6 +67,9 @@ async function bootstrap() {
     }),
   );
 
+  // ==================================================
+  // DOCUMENTACIÓN SWAGGER
+  // ==================================================
   const config = new DocumentBuilder()
     .setTitle('UECG Core API')
     .setDescription('Motor de datos estandarizado para el Sistema RUE/SIE')
@@ -62,7 +82,9 @@ async function bootstrap() {
     customSiteTitle: 'UECG API Docs',
   });
 
-  // Render inyecta dinámicamente el puerto
+  // ==================================================
+  // INICIO DEL SERVIDOR
+  // ==================================================
   const port = process.env.PORT || 4000;
 
   // 0.0.0.0 es obligatorio en Render para exponer el servicio correctamente
