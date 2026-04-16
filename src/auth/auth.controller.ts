@@ -36,10 +36,11 @@ export class AuthController {
     );
 
     if (result.status === 'SUCCESS' && result.access_token) {
+      const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('uecg_access_token', result.access_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: isProduction, // true en Render (HTTPS)
+        sameSite: isProduction ? 'none' : 'lax', // 'none' permite Cross-Site
         maxAge: 8 * 60 * 60 * 1000,
       });
     }
@@ -60,10 +61,11 @@ export class AuthController {
     );
 
     if (result.status === 'SUCCESS' && result.access_token) {
+      const isProduction = process.env.NODE_ENV === 'production';
       res.cookie('uecg_access_token', result.access_token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
+        secure: isProduction,
+        sameSite: isProduction ? 'none' : 'lax',
         maxAge: 8 * 60 * 60 * 1000,
       });
     }
@@ -75,7 +77,14 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Cierra sesión destruyendo la Cookie' })
   logout(@Res({ passthrough: true }) res: Response) {
-    res.clearCookie('uecg_access_token');
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    res.clearCookie('uecg_access_token', {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
+    });
+
     return { status: 'SUCCESS', message: 'Sesión cerrada exitosamente' };
   }
 
