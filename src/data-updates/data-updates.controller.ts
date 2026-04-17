@@ -137,4 +137,14 @@ export class DataUpdatesController {
   markPhysicalDelivery(@Param('enrollmentId') enrollmentId: string) {
     return this.dataUpdatesService.markPhysicalDelivery(enrollmentId);
   }
+
+  @Get('broadcast/classroom/:classroomId/preview')
+  @ApiCookieAuth('uecg_access_token')
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @ApiOperation({ summary: 'Simula a cuántos padres llegará la alerta por curso' })
+  async previewClassroomCampaign(@Param('classroomId') classroomId: string) {
+    // LLAMA AL SERVICIO NUEVO AQUÍ (O expónlo a través de la Fachada)
+    return this.dataUpdatesService.previewClassroomBroadcast(classroomId);
+  }
 }
