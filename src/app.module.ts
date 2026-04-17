@@ -21,6 +21,7 @@ import { PhysicalSpacesModule } from './physical-spaces/physical-spaces.module';
 import { DataUpdatesModule } from './data-updates/data-updates.module';
 import { FirebaseModule } from './firebase/firebase.module'; // 🔥 IMPORTACIÓN NUEVA
 import { GuardiansModule } from './guardians/guardians.module';
+import { IdentityModule } from './identity/identity.module';
 @Module({
   imports: [
     ScheduleModule.forRoot(),
@@ -64,6 +65,7 @@ import { GuardiansModule } from './guardians/guardians.module';
     PhysicalSpacesModule,
     DataUpdatesModule,
     GuardiansModule,
+    IdentityModule,
   ],
   controllers: [AppController],
   providers: [AppService],
