@@ -391,19 +391,27 @@ export class AuthService {
   }
 
   // ====================================================================
-  // 🔥 NUEVO: REGISTRAR EL DISPOSITIVO MÓVIL (FCM TOKEN)
+  // 🔥 CORREGIDO: REGISTRAR EL DISPOSITIVO MÓVIL (FCM TOKEN)
   // ====================================================================
   async registerFcmToken(userId: string, fcmToken: string) {
+    if (!userId) {
+      throw new ConflictException(
+        'El ID de usuario no pudo ser extraído del Token',
+      );
+    }
+
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    // Evitamos guardar el mismo token dos veces si el padre se desloguea y vuelve a loguearse
     const currentTokens = user.fcmTokens || [];
+
     if (!currentTokens.includes(fcmToken)) {
       await this.prisma.user.update({
         where: { id: userId },
         data: {
-          fcmTokens: { push: fcmToken }, // En PostgreSQL/Prisma, 'push' añade al array
+          // 🔥 MAGIA ANTI-500: Usamos el operador spread de JS en lugar de 'push' de Prisma.
+          // Esto funciona 100% de las veces sin importar si la BD estaba en null.
+          fcmTokens: [...currentTokens, fcmToken],
         },
       });
     }

@@ -134,20 +134,19 @@ export class AuthController {
   }
 
   // =========================================================
-  // 🔥 NUEVO: ENDPOINT PARA REGISTRAR DISPOSITIVO (Flutter)
+  // 🔥 CORREGIDO: ENDPOINT PARA REGISTRAR DISPOSITIVO
   // =========================================================
   @Patch('fcm-token')
-  @UseGuards(AuthGuard('jwt')) // Debe estar logueado
-  @ApiCookieAuth('uecg_access_token') // Para Swagger
+  @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Registra el token del celular (Firebase) para recibir Push',
   })
-  async registerFcmToken(
-    @Req() req: any, // Extraemos al usuario del JWT
-    @Body('fcmToken') fcmToken: string,
-  ) {
-    // req.user.sub contiene el ID del usuario que sacó del Token JWT
-    return this.authService.registerFcmToken(req.user.sub, fcmToken);
+  async registerFcmToken(@Req() req: any, @Body('fcmToken') fcmToken: string) {
+    // Dependiendo de tu jwt.strategy.ts, el ID puede venir en .sub o en .id
+    // Así atrapamos cualquiera de los dos casos para evitar que llegue undefined
+    const userId = req.user?.sub || req.user?.id;
+
+    return this.authService.registerFcmToken(userId, fcmToken);
   }
 }
