@@ -25,20 +25,26 @@ export class FirebaseService {
           admin.initializeApp({
             credential: admin.credential.cert(serviceAccount),
           });
-          this.logger.log('🔥 Firebase Admin inicializado mediante archivo JSON');
-        
-        // 2. FALLBACK PRODUCCIÓN: Usar variables de entorno (Ideal para Render)
+          this.logger.log(
+            '🔥 Firebase Admin inicializado mediante archivo JSON',
+          );
+
+          // 2. FALLBACK PRODUCCIÓN: Usar variables de entorno (Ideal para Render)
         } else if (process.env.FIREBASE_PROJECT_ID) {
           admin.initializeApp({
             credential: admin.credential.cert({
               projectId: process.env.FIREBASE_PROJECT_ID,
               clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
               // IMPORTANTE: Render rompe los saltos de línea. Esto los vuelve a arreglar:
-              privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+              privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(
+                /\\n/g,
+                '\n',
+              ),
             }),
           });
-          this.logger.log('🔥 Firebase Admin inicializado mediante Variables de Entorno');
-        
+          this.logger.log(
+            '🔥 Firebase Admin inicializado mediante Variables de Entorno',
+          );
         } else {
           this.logger.error(
             'CRÍTICO: No se encontró el archivo JSON ni las Variables de Entorno de Firebase.',
@@ -77,7 +83,7 @@ export class FirebaseService {
       };
 
       const response = await admin.messaging().sendEachForMulticast(message);
-      
+
       this.logger.log(
         `Push FCM -> Éxitos: ${response.successCount}, Fallos: ${response.failureCount}`,
       );
@@ -88,7 +94,9 @@ export class FirebaseService {
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
             const tokenSnippet = tokens[idx].substring(0, 15) + '...';
-            this.logger.error(`❌ Token [${tokenSnippet}]: ${resp.error?.code || resp.error?.message}`);
+            this.logger.error(
+              `❌ Token [${tokenSnippet}]: ${resp.error?.code || resp.error?.message}`,
+            );
           }
         });
       }
