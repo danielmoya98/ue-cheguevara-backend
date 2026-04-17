@@ -17,21 +17,16 @@ export class InstitutionsService {
     const existing = await this.prisma.institution.findUnique({
       where: { rueCode: data.rueCode },
     });
-    if (existing)
-      throw new ConflictException('El Código RUE ya está registrado');
+    if (existing) throw new ConflictException('El Código RUE ya está registrado');
 
     const institution = await this.prisma.institution.create({ data });
-    return {
-      data: institution,
-      message: 'Institución registrada exitosamente',
-    };
+    return { data: institution, message: 'Institución registrada exitosamente' };
   }
 
   async findAll(query: PaginationDto) {
     const { page = 1, limit = 10, search, sort } = query;
     const skip = (page - 1) * limit;
 
-    // 1. Filtros y Búsqueda (Punto 8 y 10)
     const whereCondition = search
       ? {
           OR: [
@@ -41,17 +36,15 @@ export class InstitutionsService {
         }
       : {};
 
-    // 2. Ordenamiento Dinámico (Punto 9)
     let orderBy = {};
     if (sort) {
       const isDesc = sort.startsWith('-');
       const field = isDesc ? sort.substring(1) : sort;
       orderBy = { [field]: isDesc ? 'desc' : 'asc' };
     } else {
-      orderBy = { createdAt: 'desc' }; // Default
+      orderBy = { createdAt: 'desc' };
     }
 
-    // 3. Ejecución Paralela (Performance - Punto 27)
     const [total, data] = await Promise.all([
       this.prisma.institution.count({ where: whereCondition }),
       this.prisma.institution.findMany({
@@ -59,11 +52,10 @@ export class InstitutionsService {
         skip,
         take: limit,
         orderBy,
-        include: { director: { select: { fullName: true, email: true } } }, // Relación limpia
+        include: { director: { select: { fullName: true, email: true } } },
       }),
     ]);
 
-    // 4. Estructura Exacta Paginada (Punto 7)
     return {
       data,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
@@ -80,9 +72,7 @@ export class InstitutionsService {
   }
 
   async update(id: string, updateData: UpdateInstitutionDto) {
-    const institution = await this.prisma.institution.findUnique({
-      where: { id },
-    });
+    const institution = await this.prisma.institution.findUnique({ where: { id } });
     if (!institution) throw new NotFoundException('Institución no encontrada');
 
     const updated = await this.prisma.institution.update({
@@ -92,8 +82,11 @@ export class InstitutionsService {
     return { data: updated, message: 'Datos institucionales actualizados' };
   }
 
+  // ==========================================
+  // 🔥 CAMPAÑA RUDE DIGITAL (OMNICANAL)
+  // ==========================================
+
   async getCampaignSettings() {
-    // Como tu sistema maneja principalmente una institución a la vez (Single-Tenant), buscamos la primera
     const institution = await this.prisma.institution.findFirst({
       select: {
         enableDigitalRudeUpdates: true,
@@ -103,12 +96,11 @@ export class InstitutionsService {
     });
 
     if (!institution) {
-      throw new NotFoundException(
-        'No se encontró la configuración de la Institución.',
-      );
+      throw new NotFoundException('No se encontró la configuración de la Institución.');
     }
 
-    return { data: institution };
+    // Retornamos directo para que Next.js lo mapee limpiamente
+    return institution;
   }
 
   async updateCampaignSettings(data: {
@@ -119,24 +111,19 @@ export class InstitutionsService {
     const institution = await this.prisma.institution.findFirst();
 
     if (!institution) {
-      throw new NotFoundException(
-        'No se encontró la configuración de la Institución.',
-      );
+      throw new NotFoundException('No se encontró la configuración de la Institución.');
     }
 
-    // Solo mapeamos los canales si el frontend realmente los envió
     let channels;
     if (data.activeNotificationChannels) {
       channels = data.activeNotificationChannels.map(
-        (channel) =>
-          NotificationChannel[channel as keyof typeof NotificationChannel],
+        (channel) => NotificationChannel[channel as keyof typeof NotificationChannel],
       );
     }
 
     const updated = await this.prisma.institution.update({
       where: { id: institution.id },
       data: {
-        // Prisma es inteligente: si le pasas 'undefined', simplemente ignora el campo y no lo sobreescribe
         enableDigitalRudeUpdates: data.enableDigitalRudeUpdates,
         maxRudeUpdatesPerYear: data.maxRudeUpdatesPerYear,
         activeNotificationChannels: channels,
