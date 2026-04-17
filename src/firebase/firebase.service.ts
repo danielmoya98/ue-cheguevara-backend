@@ -16,22 +16,35 @@ export class FirebaseService {
           'firebase-credentials.json',
         );
 
-        if (!fs.existsSync(serviceAccountPath)) {
+        // 1. INTENTO LOCAL: Buscar el archivo físico (Ideal para desarrollo en tu PC)
+        if (fs.existsSync(serviceAccountPath)) {
+          const serviceAccount = JSON.parse(
+            fs.readFileSync(serviceAccountPath, 'utf8'),
+          );
+
+          admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+          });
+          this.logger.log('🔥 Firebase Admin inicializado mediante archivo JSON');
+        
+        // 2. FALLBACK PRODUCCIÓN: Usar variables de entorno (Ideal para Render)
+        } else if (process.env.FIREBASE_PROJECT_ID) {
+          admin.initializeApp({
+            credential: admin.credential.cert({
+              projectId: process.env.FIREBASE_PROJECT_ID,
+              clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+              // IMPORTANTE: Render rompe los saltos de línea. Esto los vuelve a arreglar:
+              privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+            }),
+          });
+          this.logger.log('🔥 Firebase Admin inicializado mediante Variables de Entorno');
+        
+        } else {
           this.logger.error(
-            `No se encontró el archivo de credenciales en: ${serviceAccountPath}`,
+            'CRÍTICO: No se encontró el archivo JSON ni las Variables de Entorno de Firebase.',
           );
           return;
         }
-
-        const serviceAccount = JSON.parse(
-          fs.readFileSync(serviceAccountPath, 'utf8'),
-        );
-
-        admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-        });
-
-        this.logger.log('🔥 Firebase Admin inicializado correctamente');
       } catch (error) {
         this.logger.error('Error al inicializar Firebase Admin', error);
       }
@@ -74,7 +87,6 @@ export class FirebaseService {
         this.logger.warn(`⚠️ Detalles de los fallos de Firebase:`);
         response.responses.forEach((resp, idx) => {
           if (!resp.success) {
-            // Imprimimos el inicio del token y el código de error de Google
             const tokenSnippet = tokens[idx].substring(0, 15) + '...';
             this.logger.error(`❌ Token [${tokenSnippet}]: ${resp.error?.code || resp.error?.message}`);
           }
