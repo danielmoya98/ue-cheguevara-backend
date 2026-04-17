@@ -389,4 +389,28 @@ export class AuthService {
         'Contraseña restablecida correctamente. Ya puede iniciar sesión.',
     };
   }
+
+  // ====================================================================
+  // 🔥 NUEVO: REGISTRAR EL DISPOSITIVO MÓVIL (FCM TOKEN)
+  // ====================================================================
+  async registerFcmToken(userId: string, fcmToken: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuario no encontrado');
+
+    // Evitamos guardar el mismo token dos veces si el padre se desloguea y vuelve a loguearse
+    const currentTokens = user.fcmTokens || [];
+    if (!currentTokens.includes(fcmToken)) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          fcmTokens: { push: fcmToken }, // En PostgreSQL/Prisma, 'push' añade al array
+        },
+      });
+    }
+
+    return {
+      status: 'SUCCESS',
+      message: 'Dispositivo registrado para recibir notificaciones.',
+    };
+  }
 }

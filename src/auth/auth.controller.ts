@@ -6,15 +6,18 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  Patch,
+  Req,
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { Response } from 'express';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { LoginDto } from './dto/login.dto';
 import { SetupPasswordDto } from './dto/setup-password.dto';
 import { RegisterGuardianDto } from './dto/register-guardian.dto';
 import { RegisterStudentDto } from './dto/register-student.dto';
+import { AuthGuard } from '@nestjs/passport';
 
 @ApiTags('Autenticación')
 @Controller('auth')
@@ -128,5 +131,23 @@ export class AuthController {
       code,
       newPassword,
     );
+  }
+
+  // =========================================================
+  // 🔥 NUEVO: ENDPOINT PARA REGISTRAR DISPOSITIVO (Flutter)
+  // =========================================================
+  @Patch('fcm-token')
+  @UseGuards(AuthGuard('jwt')) // Debe estar logueado
+  @ApiCookieAuth('uecg_access_token') // Para Swagger
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Registra el token del celular (Firebase) para recibir Push',
+  })
+  async registerFcmToken(
+    @Req() req: any, // Extraemos al usuario del JWT
+    @Body('fcmToken') fcmToken: string,
+  ) {
+    // req.user.sub contiene el ID del usuario que sacó del Token JWT
+    return this.authService.registerFcmToken(req.user.sub, fcmToken);
   }
 }
