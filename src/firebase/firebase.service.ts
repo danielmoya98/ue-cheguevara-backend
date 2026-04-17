@@ -11,14 +11,11 @@ export class FirebaseService {
     // Inicializamos Firebase SOLO si no ha sido inicializado antes
     if (!admin.apps.length) {
       try {
-        // 🔥 Buscamos la ruta absoluta desde la raíz del proyecto (process.cwd())
-        // Esto evita el error de "Cannot find module" cuando NestJS compila a la carpeta /dist
         const serviceAccountPath = path.join(
           process.cwd(),
           'firebase-credentials.json',
         );
 
-        // Verificamos si el archivo realmente existe antes de intentar leerlo
         if (!fs.existsSync(serviceAccountPath)) {
           this.logger.error(
             `No se encontró el archivo de credenciales en: ${serviceAccountPath}`,
@@ -26,7 +23,6 @@ export class FirebaseService {
           return;
         }
 
-        // Leemos el JSON de forma segura con fs
         const serviceAccount = JSON.parse(
           fs.readFileSync(serviceAccountPath, 'utf8'),
         );
@@ -68,9 +64,22 @@ export class FirebaseService {
       };
 
       const response = await admin.messaging().sendEachForMulticast(message);
+      
       this.logger.log(
         `Push FCM -> Éxitos: ${response.successCount}, Fallos: ${response.failureCount}`,
       );
+
+      // 🔥 EL RADAR: Extraemos el motivo exacto del fallo
+      if (response.failureCount > 0) {
+        this.logger.warn(`⚠️ Detalles de los fallos de Firebase:`);
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            // Imprimimos el inicio del token y el código de error de Google
+            const tokenSnippet = tokens[idx].substring(0, 15) + '...';
+            this.logger.error(`❌ Token [${tokenSnippet}]: ${resp.error?.code || resp.error?.message}`);
+          }
+        });
+      }
 
       return response;
     } catch (error) {
