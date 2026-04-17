@@ -177,47 +177,32 @@ export class EnrollmentsService {
     });
   }
 
-  // 🔥 Nuestro Buscador y Paginador Inteligente
+  // 🔥 BUSCADOR Y PAGINADOR INTELIGENTE (Actualizado con Semáforo Omnicanal)
   async findAll(query: QueryEnrollmentDto) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const {
-      search,
-      academicYearId,
-      classroomId,
-      status,
-      enrollmentType,
-      level,
-    } = query;
+    const { search, academicYearId, classroomId, status, enrollmentType, level } = query;
 
-    // 🔥 1. PROCESAR EL FILTRO DE ESTADO MÚLTIPLE
     let statusFilter: any = undefined;
     if (status) {
       const statusArray = status.split(',');
       statusFilter = { in: statusArray };
     }
 
-    // 🔥 2. PROCESAR PRIORIDAD: CURSO VS NIVEL
     let classroomFilter: any = undefined;
     if (classroomId) {
-      // Si enviaron el ID del curso, filtramos exactamente por ese curso
       classroomFilter = { id: classroomId };
     } else if (level) {
-      // Si no hay curso pero hay nivel, traemos TODOS los cursos de ese nivel
       classroomFilter = { level: level };
     }
 
     const whereCondition: Prisma.EnrollmentWhereInput = {
       ...(academicYearId && { academicYearId }),
-      ...(statusFilter && { status: statusFilter }), // Usamos el array de estados
+      ...(statusFilter && { status: statusFilter }),
       ...(enrollmentType && { enrollmentType }),
-
-      // Aplicamos el filtro relacional que armamos arriba
       ...(classroomFilter && { classroom: classroomFilter }),
-
-      // Búsqueda inteligente dentro de los datos del Estudiante (Intacto)
       ...(search && {
         student: {
           OR: [
@@ -231,49 +216,70 @@ export class EnrollmentsService {
       }),
     };
 
-    // Ejecutamos el conteo y la búsqueda en paralelo (Intacto)
-    const [total, data] = await Promise.all([
+    const [total, rawData] = await Promise.all([
       this.prisma.enrollment.count({ where: whereCondition }),
       this.prisma.enrollment.findMany({
         where: whereCondition,
         skip,
         take: limit,
-        orderBy: { date: 'desc' }, // Los inscritos más recientes primero
+        orderBy: { date: 'desc' },
         include: {
           student: {
             select: {
-              id: true,
-              ci: true,
-              rudeCode: true,
-              names: true,
-              lastNamePaterno: true,
-              lastNameMaterno: true,
-              gender: true,
+              id: true, ci: true, rudeCode: true, names: true, lastNamePaterno: true, lastNameMaterno: true, gender: true,
+              // 🔥 Inyectamos la extracción de tutores para el cálculo Omnicanal
+              guardians: {
+                include: { guardian: { include: { user: true } } }
+              }
             },
           },
           classroom: {
-            select: {
-              level: true,
-              grade: true,
-              section: true,
-              shift: true,
-            },
+            select: { level: true, grade: true, section: true, shift: true },
           },
         },
       }),
     ]);
 
+    // 🔥 EL ALGORITMO PREDICTIVO INDIVIDUAL
+    const data = rawData.map((enrollment) => {
+      let hasApp = false;
+      let hasEmail = false;
+      let targetEmail = null;
+      let hasPhone = false;
+      let targetPhone = null;
+
+      if (enrollment.student.guardians) {
+        enrollment.student.guardians.forEach((g) => {
+          if (g.guardian.user && g.guardian.user.fcmTokens && g.guardian.user.fcmTokens.length > 0) {
+            hasApp = true;
+          }
+          if (g.guardian.user?.email || g.guardian.user?.recoveryEmail) {
+            hasEmail = true;
+            targetEmail = g.guardian.user?.email || g.guardian.user?.recoveryEmail;
+          }
+          if (g.guardian.phone) {
+            hasPhone = true;
+            targetPhone = g.guardian.phone;
+          }
+        });
+      }
+
+      // Limpiamos el objeto guardians gigante para no saturar el payload HTTP
+      const { guardians, ...studentClean } = enrollment.student;
+
+      return {
+        ...enrollment,
+        student: studentClean,
+        // Mandamos el semáforo listo para que React lo pinte
+        contactStatus: { hasApp, hasEmail, targetEmail, hasPhone, targetPhone }
+      };
+    });
+
     return {
       data,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
-      },
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
-
   // (Intacto)
   // 🔥 MÉTODO ACTUALIZADO: Obtiene detalles + Detección de Hermanos
   async findOne(id: string) {

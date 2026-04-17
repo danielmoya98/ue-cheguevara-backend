@@ -4,7 +4,9 @@ import { DataUpdatesController } from './data-updates.controller';
 import { PrismaModule } from '../prisma/prisma.module';
 import { JwtModule } from '@nestjs/jwt';
 import { FirebaseModule } from '../firebase/firebase.module';
-
+import { DataUpdatesBroadcastService } from './data-updates-broadcast.service';
+import { DataUpdatesTransactionService } from './data-updates-transaction.service';
+import { MailService } from '../mail/mail.service'; // 🔥 Importar el servicio
 @Module({
   imports: [
     PrismaModule,
@@ -15,6 +17,8 @@ import { FirebaseModule } from '../firebase/firebase.module';
     }),
   ],
   controllers: [DataUpdatesController],
-  providers: [DataUpdatesService],
+  providers: [DataUpdatesService, DataUpdatesBroadcastService, DataUpdatesTransactionService,
+    MailService
+  ],
 })
 export class DataUpdatesModule {}
