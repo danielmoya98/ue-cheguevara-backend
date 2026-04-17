@@ -244,19 +244,22 @@ export class EnrollmentsService {
     const data = rawData.map((enrollment) => {
       let hasApp = false;
       let hasEmail = false;
-      let targetEmail = null;
+      let targetEmail: string | null = null; // 🔥 CORREGIDO: Tipado explícito
       let hasPhone = false;
-      let targetPhone = null;
+      let targetPhone: string | null = null; // 🔥 CORREGIDO: Tipado explícito
 
       if (enrollment.student.guardians) {
         enrollment.student.guardians.forEach((g) => {
+          // Chequeo de App (FCM Token)
           if (g.guardian.user && g.guardian.user.fcmTokens && g.guardian.user.fcmTokens.length > 0) {
             hasApp = true;
           }
+          // Chequeo de Email
           if (g.guardian.user?.email || g.guardian.user?.recoveryEmail) {
             hasEmail = true;
-            targetEmail = g.guardian.user?.email || g.guardian.user?.recoveryEmail;
+            targetEmail = g.guardian.user?.email || g.guardian.user?.recoveryEmail || null;
           }
+          // Chequeo de Celular (WhatsApp)
           if (g.guardian.phone) {
             hasPhone = true;
             targetPhone = g.guardian.phone;

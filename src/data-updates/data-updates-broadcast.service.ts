@@ -206,7 +206,10 @@ export class DataUpdatesBroadcastService {
 
       // 1. Simula Push
       if (!resolved && channels.includes('PUSH_APP')) {
-        const hasToken = enrollment.student.guardians.some(g => g.guardian.user?.fcmTokens?.length > 0);
+        // 🔥 CORRECCIÓN: Agregamos ( ... ?? 0 ) para asegurar que sea un número
+        const hasToken = enrollment.student.guardians.some(
+          (g) => (g.guardian.user?.fcmTokens?.length ?? 0) > 0
+        );
         if (hasToken) { pushCount++; resolved = true; }
       }
 
