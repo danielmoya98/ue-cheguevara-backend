@@ -1,7 +1,13 @@
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
 
-@WebSocketGateway({ cors: { origin: '*' } })
+@WebSocketGateway({
+  cors: {
+    origin: ['http://localhost:3000'], // Añade aquí tu dominio de Vercel cuando lo subas
+    methods: ['GET', 'POST'],
+    credentials: true,
+  },
+})
 export class IdentityGateway {
   @WebSocketServer()
   server: Server;
