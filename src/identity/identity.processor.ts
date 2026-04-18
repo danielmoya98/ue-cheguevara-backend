@@ -62,7 +62,15 @@ export class IdentityProcessor extends WorkerHost {
     // Iteramos, generamos QR y luego PDF a Buffer
     for (const enrollment of enrollments) {
       try {
-        const qrBase64 = await this.identityService.generateQRCode(enrollment.student.id);
+        // 🔥 CORRECCIÓN: Usamos la nueva lógica de seguridad
+        let qrResponse = await this.identityService.getStudentQR(enrollment.student.id);
+
+        // Si el alumno no tiene carnet activo, el sistema lo genera automáticamente para el lote
+        if (!qrResponse.isActive) {
+          qrResponse = await this.identityService.generateNewQR(enrollment.student.id);
+        }
+
+        const qrBase64 = qrResponse.qr;
         
         const pdfBuffer = await renderToBuffer(
           React.createElement(CarnetTemplate, { 
