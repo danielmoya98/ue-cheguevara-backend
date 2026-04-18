@@ -613,6 +613,7 @@ enum AttendanceMethod {
   MANUAL // El profesor tocó la pantalla
   QR // Escaneo con la App Móvil
   BIOMETRIC // Reloj de huella/facial (Futuro)
+  SYSTEM_AUTO
 }
 
 enum NotificationFrequency {
