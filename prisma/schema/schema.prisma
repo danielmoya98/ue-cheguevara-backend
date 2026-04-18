@@ -396,6 +396,8 @@ model Student {
   talentModality         String[]
 
   qrTokenVersion Int @default(1) @map("qr_token_version")
+  // 🔥 NUEVO: Control de estado del carnet
+  hasActiveQr    Boolean @default(false) @map("has_active_qr")
 
   // Relaciones
   enrollments Enrollment[]

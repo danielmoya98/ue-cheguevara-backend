@@ -20,6 +20,15 @@ export class IdentityController {
     return { qr: qrBase64 };
   }
 
+  // 🔥 NUEVO ENDPOINT
+  @Post('generate/:studentId')
+  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Genera y activa un nuevo QR para el estudiante' })
+  async generateNewQR(@Param('studentId') studentId: string) {
+    return this.identityService.generateNewQR(studentId);
+  }
+
   @Post('revoke/:studentId')
   @Roles(Role.ADMIN, Role.SECRETARIA)
   @HttpCode(HttpStatus.OK)

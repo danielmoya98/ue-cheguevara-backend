@@ -42,17 +42,7 @@ export class IdentityService {
     }
   }
 
-  // 🔥 NUEVO: Revoca el carnet subiendo la versión en DB
-  async revokeQR(studentId: string) {
-    const student = await this.prisma.student.update({
-      where: { id: studentId },
-      data: { qrTokenVersion: { increment: 1 } },
-    });
-    return { 
-      message: 'Carnet anterior revocado exitosamente. Nueva firma criptográfica generada.', 
-      newVersion: student.qrTokenVersion 
-    };
-  }
+  
 
   // 🔥 NUEVO: Envía el trabajo al Worker
   async requestMassiveCarnets(academicYearId: string, filters: { level?: any; classroomId?: string }) {
@@ -96,6 +86,54 @@ export class IdentityService {
     }
 
     return studentId;
+  }
+
+  async getStudentQR(studentId: string) {
+    const student = await this.prisma.student.findUnique({ where: { id: studentId } });
+    if (!student) throw new NotFoundException('Estudiante no encontrado');
+
+    if (!student.hasActiveQr) {
+      return { isActive: false, qr: null }; // El frontend sabrá que debe mostrar el botón "Generar"
+    }
+
+    try {
+      const signedToken = this.generateSignedToken(student.id, student.qrTokenVersion);
+      const qr = await QRCode.toDataURL(signedToken, {
+        errorCorrectionLevel: 'H',
+        margin: 1,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      });
+      return { isActive: true, qr };
+    } catch (err) {
+      throw new InternalServerErrorException('Error al generar el QR');
+    }
+  }
+
+  // 🔥 NUEVO: Método para crear/activar el carnet por primera vez (o tras una revocación)
+  async generateNewQR(studentId: string) {
+    const student = await this.prisma.student.update({
+      where: { id: studentId },
+      data: { hasActiveQr: true }, // Encendemos la bandera
+    });
+
+    const signedToken = this.generateSignedToken(student.id, student.qrTokenVersion);
+    const qr = await QRCode.toDataURL(signedToken, {
+      errorCorrectionLevel: 'H', margin: 1, color: { dark: '#000000', light: '#FFFFFF' },
+    });
+    
+    return { message: 'Carnet activado y generado exitosamente', isActive: true, qr };
+  }
+
+  // 🔥 ACTUALIZADO: Revoca la versión Y apaga la bandera
+  async revokeQR(studentId: string) {
+    await this.prisma.student.update({
+      where: { id: studentId },
+      data: { 
+        qrTokenVersion: { increment: 1 },
+        hasActiveQr: false // 🔥 Lo apagamos, forzando a que se tenga que volver a generar
+      },
+    });
+    return { message: 'Carnet revocado. El estudiante no podrá ingresar hasta emitir uno nuevo.' };
   }
   
 }
