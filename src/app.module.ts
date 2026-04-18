@@ -23,6 +23,7 @@ import { FirebaseModule } from './firebase/firebase.module'; // 🔥 IMPORTACIÓ
 import { GuardiansModule } from './guardians/guardians.module';
 import { IdentityModule } from './identity/identity.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { ClassPeriodsModule } from './class-periods/class-periods.module';
 
 @Module({
   imports: [
@@ -69,6 +70,7 @@ import { AttendanceModule } from './attendance/attendance.module';
     GuardiansModule,
     IdentityModule,
     AttendanceModule,
+    ClassPeriodsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
