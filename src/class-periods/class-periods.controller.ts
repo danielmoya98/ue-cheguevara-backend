@@ -1,25 +1,48 @@
-import { Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, UseGuards, Query } from '@nestjs/common';
 import { ClassPeriodsService } from './class-periods.service';
+import { CreateClassPeriodDto } from './dto/create-class-period.dto';
+import { UpdateClassPeriodDto } from './dto/update-class-period.dto';
 import { AuthGuard } from '@nestjs/passport';
-import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiCookieAuth, ApiQuery } from '@nestjs/swagger';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { Role, Shift } from '../../prisma/generated/client';
 
-@ApiTags('Periodos de Clase')
+@ApiTags('Periodos de Clase (Campanario)')
 @ApiCookieAuth('uecg_access_token')
 @Controller('class-periods')
-@UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 export class ClassPeriodsController {
   constructor(private readonly classPeriodsService: ClassPeriodsService) {}
 
-  @Get()
-  @ApiOperation({ summary: 'Obtiene la lista de horas de clase' })
-  async findAll() {
-    const data = await this.classPeriodsService.findAll();
-    return { data }; // Envolvemos en { data } para que el frontend lo lea correctamente
+  @Post()
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Crea un nuevo bloque de hora o recreo' })
+  async create(@Body() createClassPeriodDto: CreateClassPeriodDto) {
+    const data = await this.classPeriodsService.create(createClassPeriodDto);
+    return { data, message: 'Periodo creado exitosamente' };
   }
 
-  @Post('seed')
-  @ApiOperation({ summary: 'Genera las horas de clase por defecto (Solo usar 1 vez)' })
-  async seed() {
-    return this.classPeriodsService.seedDefaultPeriods();
+  @Get()
+  @ApiOperation({ summary: 'Obtiene la lista de horas de clase' })
+  @ApiQuery({ name: 'shift', enum: Shift, required: false })
+  async findAll(@Query('shift') shift?: Shift) {
+    const data = await this.classPeriodsService.findAll(shift);
+    return { data };
+  }
+
+  @Patch(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Actualiza una hora específica' })
+  async update(@Param('id') id: string, @Body() updateClassPeriodDto: UpdateClassPeriodDto) {
+    const data = await this.classPeriodsService.update(id, updateClassPeriodDto);
+    return { data, message: 'Periodo actualizado' };
+  }
+
+  @Delete(':id')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Elimina un periodo (Solo si no está en uso)' })
+  async remove(@Param('id') id: string) {
+    return this.classPeriodsService.remove(id);
   }
 }

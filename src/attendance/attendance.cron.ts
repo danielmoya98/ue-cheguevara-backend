@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
+import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import { AttendanceStatus, AttendanceMethod } from '../../prisma/generated/client';
+import { AttendanceStatus, AttendanceMethod, Shift } from '../../prisma/generated/client';
 
 @Injectable()
 export class AttendanceCronService {
@@ -9,36 +9,55 @@ export class AttendanceCronService {
 
   constructor(private prisma: PrismaService) {}
 
-  // 🔥 Se ejecuta de Lunes a Viernes a las 14:00 hrs
+  // 🔥 Se ejecuta a las 14:00 hrs (Para el Turno Mañana)
   @Cron('0 14 * * 1-5')
-  async handleDailyAttendanceClosing() {
-    this.logger.log('Iniciando cierre automático de asistencia diaria...');
-    
+  async handleMorningClosing() {
+    this.logger.log('Iniciando cierre automático de asistencia (Turno Mañana)...');
+    await this.processAttendanceClosing(Shift.MANANA);
+  }
+
+  // 🔥 Se ejecuta a las 20:00 hrs (Para el Turno Tarde)
+  @Cron('0 20 * * 1-5')
+  async handleAfternoonClosing() {
+    this.logger.log('Iniciando cierre automático de asistencia (Turno Tarde)...');
+    await this.processAttendanceClosing(Shift.TARDE);
+  }
+
+  // ====================================================================
+  // MOTOR CENTRAL DINÁMICO POR TURNO
+  // ====================================================================
+  private async processAttendanceClosing(shift: Shift) {
     const today = new Date();
     const dateOnly = new Date(today.toISOString().split('T')[0]); // Fecha a las 00:00:00
 
     try {
-      // 1. Obtener todas las inscripciones activas (Alumnos oficiales)
+      // 1. Obtener alumnos inscritos SÓLO de cursos de este turno
       const activeEnrollments = await this.prisma.enrollment.findMany({
         where: { 
           status: 'INSCRITO',
-          academicYear: { status: 'ACTIVE' }
+          academicYear: { status: 'ACTIVE' },
+          classroom: { shift: shift } // 🔥 Filtro vital de turno
         },
-        select: { id: true, classroomId: true, student: { select: { names: true } } }
+        select: { id: true }
       });
 
-      // 2. Obtener el primer periodo del día (Ej: 1ra Hora / Ingreso)
-      // Asumimos que la falta general del día se marca en el primer periodo.
-      const firstPeriod = await this.prisma.classPeriod.findFirst({
-        orderBy: { startTime: 'asc' }
-      });
-
-      if (!firstPeriod) {
-        this.logger.warn('No hay periodos de clase configurados. Abortando CronJob.');
+      if (activeEnrollments.length === 0) {
+        this.logger.log(`No hay alumnos activos en el turno ${shift}. Omitiendo.`);
         return;
       }
 
-      // 3. Obtener todos los registros de asistencia que YA existen hoy para ese periodo
+      // 2. Obtener la 1ra Hora real de este turno (Ignorando recreos)
+      const firstPeriod = await this.prisma.classPeriod.findFirst({
+        where: { shift: shift, isBreak: false },
+        orderBy: { order: 'asc' } // Usamos 'order' para máxima precisión
+      });
+
+      if (!firstPeriod) {
+        this.logger.warn(`No hay periodos configurados para el turno ${shift}. Abortando.`);
+        return;
+      }
+
+      // 3. Buscar quiénes SÍ vinieron hoy a esa 1ra hora
       const existingRecords = await this.prisma.attendanceRecord.findMany({
         where: {
           date: dateOnly,
@@ -47,43 +66,38 @@ export class AttendanceCronService {
         select: { enrollmentId: true }
       });
 
-      // Creamos un Set (conjunto) para búsquedas ultra-rápidas
       const presentEnrollmentIds = new Set(existingRecords.map(r => r.enrollmentId));
 
-      // 4. Filtrar: ¿Quién NO está en el Set de los que sí vinieron?
+      // 4. Filtrar a los ausentes
       const absentEnrollments = activeEnrollments.filter(
         enrollment => !presentEnrollmentIds.has(enrollment.id)
       );
 
       if (absentEnrollments.length === 0) {
-        this.logger.log('Cierre perfecto: Todos los alumnos tienen registro hoy.');
+        this.logger.log(`Cierre perfecto (${shift}): Todos tienen registro hoy.`);
         return;
       }
 
-      // 5. El Hacha: Preparar la inserción masiva (Bulk Insert) de Faltas
+      // 5. Inserción Masiva
       const missingRecordsData = absentEnrollments.map(enrollment => ({
         enrollmentId: enrollment.id,
         classPeriodId: firstPeriod.id,
         date: dateOnly,
         status: AttendanceStatus.ABSENT,
-        method: AttendanceMethod.SYSTEM_AUTO, // 🔥 Marcamos que fue un robot, no un humano
+        method: AttendanceMethod.SYSTEM_AUTO,
         timestamp: new Date(),
-        markedById: null, // No fue un profesor
+        markedById: null,
       }));
 
-      // 6. Ejecutar inserción en la Base de Datos
       const result = await this.prisma.attendanceRecord.createMany({
         data: missingRecordsData,
-        skipDuplicates: true, // Si por algún milisegundo se cruza un dato, no explota
+        skipDuplicates: true,
       });
 
-      this.logger.log(`Cierre completado: Se registraron ${result.count} faltas automáticas (ABSENT).`);
-
-      // (Futuro) Aquí podrías disparar un evento para que BullMQ envíe un 
-      // Push Notification al celular de los padres diciendo: "Su hijo no asistió hoy".
+      this.logger.log(`Cierre completado (${shift}): Se registraron ${result.count} faltas automáticas (ABSENT).`);
 
     } catch (error) {
-      this.logger.error('Error durante el cierre de asistencia', error);
+      this.logger.error(`Error durante el cierre de asistencia (${shift})`, error);
     }
   }
 }
