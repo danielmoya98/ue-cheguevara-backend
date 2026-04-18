@@ -113,11 +113,15 @@ export class AttendanceService {
     };
   }
 
+ 
   // ==========================================
   // 🔥 MONITOR EN VIVO (Admin y Docentes)
   // ==========================================
   
   async getDailyMonitor(dto: { classroomId: string, classPeriodId: string, date?: string }) {
+    // 🎤 1. LOG DE DEPURACIÓN: ¿Qué ID nos pide el frontend?
+    console.log(`🔍 [MONITOR] Frontend solicita ver el curso ID: ${dto.classroomId}`);
+
     // 1. Resolver la fecha (Si no envían, es hoy)
     const targetDate = dto.date ? new Date(dto.date) : new Date();
     const dateOnly = new Date(targetDate.toISOString().split('T')[0]);
@@ -131,8 +135,16 @@ export class AttendanceService {
       include: { student: true }
     });
 
+    // 🎤 2. LOG DE DEPURACIÓN: ¿Cuántos encontró Prisma?
+    console.log(`✅ [MONITOR] Prisma encontró ${enrollments.length} alumnos inscritos para ese ID.`);
+
+    // 🛡️ Si no hay alumnos, devolvemos la estructura completa pero en ceros
     if (enrollments.length === 0) {
-      return { data: [], message: 'No hay alumnos inscritos en este curso.' };
+      return { 
+        data: [], 
+        summary: { total: 0, present: 0, late: 0, absent: 0, pending: 0 },
+        message: 'No hay alumnos inscritos en este curso.' 
+      };
     }
 
     // 3. Traer los registros de asistencia que YA EXISTEN para esa hora y día
