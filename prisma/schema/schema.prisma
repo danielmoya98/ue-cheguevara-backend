@@ -1,12 +1,11 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider     = "prisma-client"
-  output       = "../generated"
+  provider = "prisma-client"
+
+  output = "../generated"
+
   moduleFormat = "cjs"
 }
 
@@ -22,8 +21,8 @@ enum Role {
   ADMIN // Director / Administrador principal
   SECRETARIA // Secretaría Académica
   DOCENTE // Plantel Docente (Web & App)
-  PADRE // 🔥 NUEVO: Para la App Móvil
-  ESTUDIANTE // 🔥 NUEVO: Para la App Móvil
+  PADRE // Para la App Móvil
+  ESTUDIANTE // Para la App Móvil
 }
 
 enum UserStatus {
@@ -83,7 +82,7 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  // --- NUEVOS CAMPOS DE PERFIL (Agrega esto) ---
+  // --- NUEVOS CAMPOS DE PERFIL ---
   ci        String? // Carnet de Identidad
   phone     String? // Teléfono
   address   String? // Dirección
@@ -104,7 +103,7 @@ model User {
   scheduleSlots       ScheduleSlot[]
 
   // ==========================================
-  // 🔥 NUEVO: RELACIONES PARA LA APP MÓVIL
+  // RELACIONES PARA LA APP MÓVIL
   // ==========================================
   // Si este usuario es un padre, se conecta a su registro físico de Tutor
   guardianId String?   @unique @map("guardian_id")
@@ -120,13 +119,16 @@ model User {
 
   fcmTokens String[] @map("fcm_tokens")
 
+  // 🔥 CORRECCIÓN: Relación exacta para saber qué profesor tomó la lista
+  attendancesMarked AttendanceRecord[] @relation("AttendanceMarker")
+
   @@map("users")
 }
 
 model Institution {
   id             String         @id @default(uuid())
   rueCode        String         @unique @map("rue_code") // Código RUE / SIE (Ej. 80730145)
-  name           String // Nombre oficial (Ej. Unidad Educativa Che Guevara)
+  name           String // Nombre oficial
   dependencyType DependencyType @map("dependency_type")
 
   // Ubicación Geográfica (Estructura SIE)
@@ -158,13 +160,20 @@ model Institution {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // 🔥 NUEVO: Modo de asignación de horarios
+  // Modo de asignación de horarios
   schedulingMode SchedulingMode @default(FIXED_BASE) @map("scheduling_mode")
 
   // 🔥 FASE 1: Configuración de Campaña RUDE
   enableDigitalRudeUpdates   Boolean               @default(false) @map("enable_digital_updates")
   maxRudeUpdatesPerYear      Int                   @default(2) @map("max_rude_updates_per_year")
   activeNotificationChannels NotificationChannel[] @default([PUSH_APP]) @map("active_notification_channels")
+
+  // 🔥 FASE 2: Motor de Control de Asistencia
+  enableQrAttendance        Boolean               @default(false) @map("enable_qr_attendance")
+  enableBiometricAttendance Boolean               @default(false) @map("enable_biometric_attendance")
+  lateToleranceMinutes      Int                   @default(5) @map("late_tolerance_minutes")
+  absentToleranceMinutes    Int                   @default(15) @map("absent_tolerance_minutes")
+  notificationFrequency     NotificationFrequency @default(ALERTS_ONLY) @map("notification_frequency")
 
   @@map("institutions")
 }
@@ -174,9 +183,9 @@ model Institution {
 // ==========================================
 
 enum AcademicStatus {
-  PLANNING // Gestión futura en planificación (Ej. Diciembre preparando el próximo año)
+  PLANNING // Gestión futura en planificación
   ACTIVE // Gestión actual en curso
-  CLOSED // Gestión histórica cerrada (Solo lectura, libretas selladas)
+  CLOSED // Gestión histórica cerrada
 }
 
 // 1. GESTIÓN ESCOLAR (El Año Lectivo)
@@ -201,8 +210,8 @@ model AcademicYear {
 model Subject {
   id    String         @id @default(uuid())
   name  String // Ej. "Matemáticas", "Física"
-  level EducationLevel // Para filtrar (Ej. Física solo sale en Secundaria)
-  area  String? // Ej. "Ciencias Exactas", "Ciencias Sociales"
+  level EducationLevel // Para filtrar
+  area  String? // Ej. "Ciencias Exactas"
 
   assignments TeacherAssignment[]
 
@@ -219,9 +228,9 @@ model Classroom {
   academicYear   AcademicYear @relation(fields: [academicYearId], references: [id])
 
   // Reglas RUE
-  level   EducationLevel // Ej. SECUNDARIA
-  shift   Shift // Ej. MANANA
-  grade   String // Ej. "Primero", "Segundo", "Sexto"
+  level   EducationLevel
+  shift   Shift
+  grade   String
   section String // PARALELO: Ej. "A", "B", "C"
 
   capacity Int @default(35) // Límite de alumnos por aula
@@ -232,23 +241,21 @@ model Classroom {
 
   // Relaciones
   subjectAssignments TeacherAssignment[]
-  // enrollments     Enrollment[]        // <-- Lo activaremos en el próximo módulo (Estudiantes)
 
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   scheduleSlots ScheduleSlot[]
   enrollments   Enrollment[]
-  // 🔥 NUEVO: Si la institución está en modo FIXED_BASE, este es su salón principal
-  baseRoomId    String?        @map("base_room_id")
-  baseRoom      PhysicalSpace? @relation("ClassroomBaseRoom", fields: [baseRoomId], references: [id])
 
-  // REGLA DE ORO DE BASE DE DATOS:
-  // No pueden existir dos "1ro A de Secundaria en la Mañana" en el mismo año.
+  // Si la institución está en modo FIXED_BASE, este es su salón principal
+  baseRoomId String?        @map("base_room_id")
+  baseRoom   PhysicalSpace? @relation("ClassroomBaseRoom", fields: [baseRoomId], references: [id])
+
   @@unique([academicYearId, level, grade, section, shift])
   @@map("classrooms")
 }
 
-// 4. DISTRIBUCIÓN DE CARGA HORARIA (Docente <-> Materia <-> Curso)
+// 4. DISTRIBUCIÓN DE CARGA HORARIA
 model TeacherAssignment {
   id String @id @default(uuid())
 
@@ -265,27 +272,27 @@ model TeacherAssignment {
   updatedAt     DateTime       @updatedAt @map("updated_at")
   scheduleSlots ScheduleSlot[]
 
-  // REGLA: En un mismo curso, una materia solo la dicta un profesor titular
   @@unique([classroomId, subjectId])
   @@map("teacher_assignments")
 }
 
-// 1. Catálogo de Periodos de Clase (Los horarios fijos del colegio)
+// 1. Catálogo de Periodos de Clase
 model ClassPeriod {
   id        String  @id @default(uuid())
   name      String // Ej. "1er Periodo" o "Recreo"
   startTime String // Ej. "08:00"
   endTime   String // Ej. "08:40"
-  shift     Shift // MANANA, TARDE, NOCHE
-  isBreak   Boolean @default(false) // Si es true, la UI lo pinta como recreo y no deja soltar materias
-  order     Int // Para ordenarlos cronológicamente (1, 2, 3...)
+  shift     Shift
+  isBreak   Boolean @default(false)
+  order     Int
 
-  schedules ScheduleSlot[]
+  attendanceRecords AttendanceRecord[]
+  schedules         ScheduleSlot[]
 
   @@map("class_periods")
 }
 
-// 2. El Casillero del Horario (La celda donde cae la materia)
+// 2. El Casillero del Horario
 model ScheduleSlot {
   id        String @id @default(uuid())
   dayOfWeek Int // 1 = Lunes, 2 = Martes, ..., 5 = Viernes
@@ -293,7 +300,7 @@ model ScheduleSlot {
   classPeriodId       String @map("class_period_id")
   teacherAssignmentId String @map("teacher_assignment_id")
 
-  // 🔥 DESNORMALIZACIÓN ESTRATÉGICA PARA REGLAS DE ORO
+  // Desnormalización estratégica
   classroomId String @map("classroom_id")
   teacherId   String @map("teacher_id")
 
@@ -305,9 +312,7 @@ model ScheduleSlot {
   physicalSpaceId   String?           @map("physical_space_id")
   physicalSpace     PhysicalSpace?    @relation("SlotPhysicalSpace", fields: [physicalSpaceId], references: [id])
 
-  // 🛡️ REGLA DE ORO 1: Un curso NO puede tener dos materias a la misma hora
   @@unique([classroomId, dayOfWeek, classPeriodId])
-  // 🛡️ REGLA DE ORO 2: Un profesor NO puede dictar clases en dos cursos distintos a la misma hora
   @@unique([teacherId, dayOfWeek, classPeriodId])
   @@map("schedule_slots")
 }
@@ -322,31 +327,31 @@ enum Gender {
 }
 
 enum EnrollmentStatus {
-  REVISION_SIE // Esperando que el director valide el RUDE en el Ministerio
-  INSCRITO // Oficialmente activo en el curso
-  RETIRADO // Abandonó el colegio a medio año
-  TRASLADO // Se trasladó a otra unidad educativa
-  RECHAZADO // 👈 ¡Faltaba este para la acción de la secretaria!
-  OBSERVADO // (Opcional) Por si le falta algún documento
+  REVISION_SIE
+  INSCRITO
+  RETIRADO
+  TRASLADO
+  RECHAZADO
+  OBSERVADO
 }
 
 enum EnrollmentType {
-  NUEVO // Entra por primera vez al colegio o al sistema escolar
-  ANTIGUO // Ratificación automática
-  TRASPASO // Viene trasladado de otro colegio en Bolivia
-  EXTRANJERO // Viene de otro país (Requiere homologación)
+  NUEVO
+  ANTIGUO
+  TRASPASO
+  EXTRANJERO
 }
 
-// 1. EL ESTUDIANTE (Catálogo Inmutable Global)
+// 1. EL ESTUDIANTE
 model Student {
   id       String  @id @default(uuid())
-  rudeCode String? @unique // Nullable porque los NUEVOS aún no lo tienen
+  rudeCode String? @unique
 
   // Identificación
-  documentType String  @default("CI") // CI, DNI, PASAPORTE, DECLARACION
+  documentType String  @default("CI")
   ci           String? @unique
   complement   String?
-  expedition   String? // LP, CB, SC, etc.
+  expedition   String?
 
   // Nombres
   lastNamePaterno String?
@@ -360,41 +365,41 @@ model Student {
   birthProvince   String?
   birthLocality   String?
 
-  // Certificado de Nacimiento Oficial (Para cotejo SIE)
+  // Certificado de Nacimiento Oficial
   certOficialia String?
   certLibro     String?
   certPartida   String?
   certFolio     String?
 
-  // Capacidades Diferentes (Salud Crónica)
+  // Capacidades Diferentes
   hasDisability       Boolean @default(false)
-  disabilityCode      String? // IBC/CODEPEDIS
+  disabilityCode      String?
   disabilityType      String?
   disabilityDegree    String?
   hasAutism           Boolean @default(false)
   autismType          String?
   learningDisability  Boolean @default(false)
   extraordinaryTalent Boolean @default(false)
-  disabilityRegistry  String? // Para guardar si es "CODEPEDIS" o "IBC"
-  disabilityOrigin    String? // Para guardar "DE_NACIMIENTO" o "ADQUIRIDA"
+  disabilityRegistry  String?
+  disabilityOrigin    String?
 
   // 2.10 Dificultades de Aprendizaje
-  learningDisabilityStatus String   @default("NO") // DIAGNOSTICO, INFORME, SIN_DIAGNOSTICO, NO
-  learningDisabilityTypes  String[] // ["LECTURA_ESCRITURA", "RAZONAMIENTO", "CALCULO"]
-  learningSupportLocation  String[] // ["UNIDAD_EDUCATIVA", "CENTRO_ESPECIAL", ...]
+  learningDisabilityStatus String   @default("NO")
+  learningDisabilityTypes  String[]
+  learningSupportLocation  String[]
 
   // 2.11 Talento Extraordinario
   hasExtraordinaryTalent Boolean  @default(false)
-  talentType             String? // GENERAL, ESPECIFICO, DOBLE
-  talentSpecifics        String[] // ["ARTISTICO", "MUSICAL", ...] (Solo si es Específico)
-  talentIQ               String? // Coeficiente Intelectual
-  talentModality         String[] // Modalidades marcadas
+  talentType             String?
+  talentSpecifics        String[]
+  talentIQ               String?
+  talentModality         String[]
 
   qrTokenVersion Int @default(1) @map("qr_token_version")
 
   // Relaciones
   enrollments Enrollment[]
-  guardians   StudentGuardian[] // Relación con padres/tutores
+  guardians   StudentGuardian[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -418,21 +423,19 @@ model Enrollment {
   classroom    Classroom    @relation(fields: [classroomId], references: [id])
   academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
 
-  // El Formulario RUDE está anclado a esta inscripción anual
   rudeRecord RudeRecord?
 
-  // 🔥 NUEVO: Campo JSON para guardar el checklist de documentos físicos
   receivedDocuments Json? @map("received_documents")
 
-  // 🔥 FASE 1: Tracking de Actualizaciones
   rudeUpdateCount Int                 @default(0) @map("rude_update_count")
   updateRequests  DataUpdateRequest[]
 
-  // Regla de Negocio: Un estudiante NO puede inscribirse dos veces en el mismo año
+  attendanceRecords AttendanceRecord[]
+
   @@unique([studentId, academicYearId])
 }
 
-// 3. PADRES Y TUTORES (Reutilizables si tienen varios hijos)
+// 3. PADRES Y TUTORES
 model Guardian {
   id              String    @id @default(uuid())
   ci              String?   @unique
@@ -444,17 +447,15 @@ model Guardian {
   occupation      String?
   educationLevel  String?
   phone           String?
-  language        String? // "CASTELLANO", "QUECHUA", etc.
-  birthDate       DateTime? // Fecha de nacimiento
-  // (Opcional, para Tutor Extraordinario 5.5)
-  jobTitle        String? // Cargo actual
-  institution     String? // Nombre de la Institución
+  language        String?
+  birthDate       DateTime?
+  jobTitle        String?
+  institution     String?
 
   students StudentGuardian[]
   user     User?
 }
 
-// Tabla Pivote para relación Estudiante <-> Tutor
 model StudentGuardian {
   studentId    String
   guardianId   String
@@ -466,7 +467,7 @@ model StudentGuardian {
   @@id([studentId, guardianId])
 }
 
-// 4. EL FORMULARIO RUDE (Fotografía Anual Socioeconómica)
+// 4. EL FORMULARIO RUDE
 model RudeRecord {
   id           String @id @default(uuid())
   enrollmentId String @unique
@@ -484,14 +485,14 @@ model RudeRecord {
 
   // IV. 4.1 Idioma y Cultura
   nativeLanguage    String?
-  frequentLanguages String[] // Ej: ["Castellano", "Quechua"]
+  frequentLanguages String[]
   culturalIdentity  String?
 
   // IV. 4.2 Salud
   medicalVisits       String?
   nearestHealthCenter Boolean  @default(false)
-  healthCareLocations String[] // ["SUS", "CAJA", "PRIVADO", "FARMACIA"]
-  healthCenterVisits  String? // "1_A_2", "3_A_5", "6_MAS", "NINGUNA"
+  healthCareLocations String[]
+  healthCenterVisits  String?
   healthInsurance     Boolean  @default(false)
 
   // IV. 4.3 Servicios Básicos
@@ -512,7 +513,7 @@ model RudeRecord {
   workShift     String[]
   workFrequency String?
   gotPaid       String?
-  workedMonths  String[] // ["ENE", "FEB", ...]
+  workedMonths  String[]
 
   // IV. 4.6 Transporte
   transportType String?
@@ -523,7 +524,7 @@ model RudeRecord {
   abandonReasons    String[]
 
   // V. 5.1 Vive Habitualmente Con
-  livesWith String? // "AMBOS", "PADRE", "MADRE", "TUTOR", "SOLO", "CENTRO_ACOGIDA"
+  livesWith String?
 
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 }
@@ -532,15 +533,15 @@ model RudeRecord {
 // NUEVOS ENUMS PARA GESTIÓN DE ESPACIOS
 // ==========================================
 enum SchedulingMode {
-  FIXED_BASE // Modelo Actual: Un aula base por curso + excepciones (Cancha/Lab)
-  DYNAMIC // Modelo Universitario: Cada materia puede tener un aula distinta
+  FIXED_BASE
+  DYNAMIC
 }
 
 enum SpaceType {
-  SALON // Aula normal
-  LABORATORIO // Computación, Química, Física
-  CANCHA // Educación Física
-  AUDITORIO // Eventos
+  SALON
+  LABORATORIO
+  CANCHA
+  AUDITORIO
   OTRO
 }
 
@@ -549,11 +550,10 @@ enum SpaceType {
 // ==========================================
 model PhysicalSpace {
   id       String    @id @default(uuid())
-  name     String // Ej. "Aula 101", "Cancha Principal"
+  name     String
   type     SpaceType @default(SALON)
   isActive Boolean   @default(true)
 
-  // Relaciones inversas
   baseClassrooms Classroom[]    @relation("ClassroomBaseRoom")
   scheduleSlots  ScheduleSlot[] @relation("SlotPhysicalSpace")
 
@@ -584,20 +584,70 @@ model DataUpdateRequest {
   id           String @id @default(uuid())
   enrollmentId String @map("enrollment_id")
 
-  // Guardamos el objeto íntegro del formulario enviado por el padre
   proposedData Json @map("proposed_data")
 
   status UpdateRequestStatus @default(PENDING)
 
-  // Auditoría
   createdAt       DateTime  @default(now()) @map("created_at")
   reviewedAt      DateTime? @map("reviewed_at")
   rejectionReason String?   @map("rejection_reason")
 
   enrollment Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
 
-  // 🛡️ REGLA DE SEGURIDAD: Solo una solicitud pendiente por alumno a la vez
-  // Si envían otra, el backend debe hacer un UPSERT o rechazar si ya hay una PENDING.
   @@unique([enrollmentId, status])
   @@map("data_update_requests")
+}
+
+// ==========================================
+// NUEVOS ENUMS PARA CONTROL DE ASISTENCIA
+// ==========================================
+
+enum AttendanceStatus {
+  PRESENT // A tiempo
+  LATE // Atraso (Llegó después de la tolerancia)
+  ABSENT // Falta (No llegó o excedió el límite de falta)
+  EXCUSED // Licencia / Justificado (Por secretaría)
+}
+
+enum AttendanceMethod {
+  MANUAL // El profesor tocó la pantalla
+  QR // Escaneo con la App Móvil
+  BIOMETRIC // Reloj de huella/facial (Futuro)
+}
+
+enum NotificationFrequency {
+  ALERTS_ONLY // Solo avisa si hay Atraso o Falta
+  ENTRY_EXIT // Avisa en el primer escaneo del día y en el último
+  PER_CLASS // Avisa cada vez que el alumno entra a una nueva materia
+}
+
+// ==========================================
+// MÓDULO 4: CONTROL DE ASISTENCIA
+// ==========================================
+
+model AttendanceRecord {
+  id String @id @default(uuid())
+
+  enrollmentId String     @map("enrollment_id")
+  enrollment   Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+
+  classPeriodId String      @map("class_period_id")
+  classPeriod   ClassPeriod @relation(fields: [classPeriodId], references: [id])
+
+  date DateTime @db.Date
+
+  status AttendanceStatus
+  method AttendanceMethod @default(MANUAL)
+
+  timestamp  DateTime @default(now())
+  markedById String?  @map("marked_by_id")
+  marker     User?    @relation("AttendanceMarker", fields: [markedById], references: [id])
+
+  justification String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([enrollmentId, classPeriodId, date])
+  @@map("attendance_records")
 }

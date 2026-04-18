@@ -27,6 +27,7 @@ import {
   CACHE_MANAGER,
 } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
+import { UpdateAttendanceSettingsDto } from './dto/update-attendance-settings.dto'; // <-- Importa el DTO nuevo
 
 @ApiTags('Institución (RUE)')
 @ApiCookieAuth('uecg_access_token')
@@ -94,6 +95,21 @@ export class InstitutionsController {
   async update(@Param('id') id: string, @Body() updateInstitutionDto: UpdateInstitutionDto, @Req() req: any) {
     updateInstitutionDto.directorId = req.user.userId;
     const result = await this.institutionsService.update(id, updateInstitutionDto);
+    await this.cacheManager.clear();
+    return result;
+  }
+
+  @Get('attendance-settings')
+  @ApiOperation({ summary: 'Obtiene las reglas de asistencia' })
+  getAttendanceSettings() {
+    return this.institutionsService.getAttendanceSettings();
+  }
+
+  @Patch('attendance-settings')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Actualiza las reglas de asistencia' })
+  async updateAttendanceSettings(@Body() body: UpdateAttendanceSettingsDto) {
+    const result = await this.institutionsService.updateAttendanceSettings(body);
     await this.cacheManager.clear();
     return result;
   }

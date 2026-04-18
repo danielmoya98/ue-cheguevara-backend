@@ -140,4 +140,55 @@ export class InstitutionsService {
       message: 'Configuración de la Campaña RUDE actualizada exitosamente',
     };
   }
+
+  // ==========================================
+  // 🔥 MOTOR DE ASISTENCIA Y NOTIFICACIONES
+  // ==========================================
+
+  async getAttendanceSettings() {
+    const institution = await this.prisma.institution.findFirst({
+      select: {
+        enableQrAttendance: true,
+        enableBiometricAttendance: true,
+        lateToleranceMinutes: true,
+        absentToleranceMinutes: true,
+        notificationFrequency: true,
+      },
+    });
+
+    if (!institution) throw new NotFoundException('No se encontró la configuración.');
+    return institution;
+  }
+
+  async updateAttendanceSettings(data: {
+    enableQrAttendance?: boolean;
+    enableBiometricAttendance?: boolean;
+    lateToleranceMinutes?: number;
+    absentToleranceMinutes?: number;
+    notificationFrequency?: string;
+  }) {
+    const institution = await this.prisma.institution.findFirst();
+    if (!institution) throw new NotFoundException('No se encontró la configuración.');
+
+    const updated = await this.prisma.institution.update({
+      where: { id: institution.id },
+      data: {
+        enableQrAttendance: data.enableQrAttendance,
+        enableBiometricAttendance: data.enableBiometricAttendance,
+        lateToleranceMinutes: data.lateToleranceMinutes,
+        absentToleranceMinutes: data.absentToleranceMinutes,
+        notificationFrequency: data.notificationFrequency as any,
+      },
+      select: {
+        enableQrAttendance: true,
+        enableBiometricAttendance: true,
+        lateToleranceMinutes: true,
+        absentToleranceMinutes: true,
+        notificationFrequency: true,
+      },
+    });
+
+    return { data: updated, message: 'Configuración de Asistencia guardada.' };
+  }
+  
 }
