@@ -17,15 +17,13 @@ import { TimetableTemplate } from './templates/timetable.template';
 import React from 'react';
 
 @Injectable()
-export class TimetablesService implements OnModuleInit {
+export class TimetablesService {
   constructor(
     private prisma: PrismaService,
     @InjectQueue('export-queue') private exportQueue: Queue,
   ) {}
 
-  async onModuleInit() {
-    await this.seedMorningPeriods();
-  }
+
 
   async getPeriods(shift: Shift) {
     return this.prisma.classPeriod.findMany({
@@ -205,96 +203,6 @@ export class TimetablesService implements OnModuleInit {
     });
     const fileStream = fs.createReadStream(filePath);
     fileStream.pipe(res);
-  }
-
-  private async seedMorningPeriods() {
-    const existing = await this.prisma.classPeriod.count({
-      where: { shift: Shift.MANANA },
-    });
-    if (existing > 0) return;
-    const periods = [
-      {
-        name: '1er Periodo',
-        startTime: '08:00',
-        endTime: '08:40',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 1,
-      },
-      {
-        name: '2do Periodo',
-        startTime: '08:40',
-        endTime: '09:20',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 2,
-      },
-      {
-        name: '1er Recreo',
-        startTime: '09:20',
-        endTime: '09:30',
-        shift: Shift.MANANA,
-        isBreak: true,
-        order: 3,
-      },
-      {
-        name: '3er Periodo',
-        startTime: '09:30',
-        endTime: '10:10',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 4,
-      },
-      {
-        name: '4to Periodo',
-        startTime: '10:10',
-        endTime: '10:50',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 5,
-      },
-      {
-        name: '2do Recreo',
-        startTime: '10:50',
-        endTime: '11:00',
-        shift: Shift.MANANA,
-        isBreak: true,
-        order: 6,
-      },
-      {
-        name: '5to Periodo',
-        startTime: '11:00',
-        endTime: '11:40',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 7,
-      },
-      {
-        name: '6to Periodo',
-        startTime: '11:40',
-        endTime: '12:20',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 8,
-      },
-      {
-        name: '7mo Periodo',
-        startTime: '12:20',
-        endTime: '13:00',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 9,
-      },
-      {
-        name: '8vo Periodo',
-        startTime: '13:00',
-        endTime: '13:40',
-        shift: Shift.MANANA,
-        isBreak: false,
-        order: 10,
-      },
-    ];
-    await this.prisma.classPeriod.createMany({ data: periods });
   }
 
   // =========================================================================
