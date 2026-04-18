@@ -14,13 +14,12 @@ export class IdentityController {
   constructor(private readonly identityService: IdentityService) {}
 
   @Get('qr/:studentId')
-  @ApiOperation({ summary: 'Obtiene el QR firmado de un alumno en Base64' })
+  @ApiOperation({ summary: 'Obtiene el estado y el QR del alumno' })
   async getStudentQR(@Param('studentId') studentId: string) {
-    const qrBase64 = await this.identityService.generateQRCode(studentId);
-    return { qr: qrBase64 };
+    // 🔥 CORRECCIÓN CLAVE: Devolvemos directamente lo que manda el servicio (isActive + qr)
+    return this.identityService.getStudentQR(studentId);
   }
 
-  // 🔥 NUEVO ENDPOINT
   @Post('generate/:studentId')
   @Roles(Role.ADMIN, Role.SECRETARIA)
   @HttpCode(HttpStatus.CREATED)
