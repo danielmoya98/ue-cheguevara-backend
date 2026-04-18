@@ -390,6 +390,8 @@ model Student {
   talentIQ               String? // Coeficiente Intelectual
   talentModality         String[] // Modalidades marcadas
 
+  qrTokenVersion Int @default(1) @map("qr_token_version")
+
   // Relaciones
   enrollments Enrollment[]
   guardians   StudentGuardian[] // Relación con padres/tutores
