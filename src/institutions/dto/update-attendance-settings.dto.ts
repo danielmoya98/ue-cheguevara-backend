@@ -1,6 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsInt, Min, IsEnum, IsOptional } from 'class-validator';
-import { NotificationFrequency } from '../../../prisma/generated/client';
+import { IsBoolean, IsInt, Min, IsString, IsOptional } from 'class-validator';
 
 export class UpdateAttendanceSettingsDto {
   @ApiProperty({ description: 'Habilitar toma de asistencia con App Móvil QR' })
@@ -15,18 +14,20 @@ export class UpdateAttendanceSettingsDto {
 
   @ApiProperty({ description: 'Minutos de tolerancia para Atraso' })
   @IsOptional()
-  @IsInt()
-  @Min(0)
+  @IsInt({ message: 'La tolerancia de atraso debe ser un número entero' })
+  @Min(0, { message: 'No puede ser menor a 0' })
   lateToleranceMinutes?: number;
 
   @ApiProperty({ description: 'Minutos de tolerancia para Falta Injustificada' })
   @IsOptional()
-  @IsInt()
-  @Min(0)
+  @IsInt({ message: 'La tolerancia de falta debe ser un número entero' })
+  @Min(0, { message: 'No puede ser menor a 0' })
   absentToleranceMinutes?: number;
 
-  @ApiProperty({ enum: NotificationFrequency, description: 'Frecuencia de alertas a padres' })
+  // 🔥 CORRECCIÓN CLAVE: Usamos IsString en lugar de IsEnum para evitar 
+  // el choque de tipos con el diccionario compilado de Prisma.
+  @ApiProperty({ description: 'Frecuencia de alertas a padres' })
   @IsOptional()
-  @IsEnum(NotificationFrequency)
-  notificationFrequency?: NotificationFrequency;
+  @IsString({ message: 'La frecuencia de notificación debe ser una cadena de texto' })
+  notificationFrequency?: string;
 }
