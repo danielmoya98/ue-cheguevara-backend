@@ -112,4 +112,106 @@ export class AttendanceService {
       },
     };
   }
+
+  // ==========================================
+  // 🔥 MONITOR EN VIVO (Admin y Docentes)
+  // ==========================================
+  
+  async getDailyMonitor(dto: { classroomId: string, classPeriodId: string, date?: string }) {
+    // 1. Resolver la fecha (Si no envían, es hoy)
+    const targetDate = dto.date ? new Date(dto.date) : new Date();
+    const dateOnly = new Date(targetDate.toISOString().split('T')[0]);
+
+    // 2. Traer a TODOS los alumnos inscritos en ese curso
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: { 
+        classroomId: dto.classroomId, 
+        status: 'INSCRITO' 
+      },
+      include: { student: true }
+    });
+
+    if (enrollments.length === 0) {
+      return { data: [], message: 'No hay alumnos inscritos en este curso.' };
+    }
+
+    // 3. Traer los registros de asistencia que YA EXISTEN para esa hora y día
+    const attendanceRecords = await this.prisma.attendanceRecord.findMany({
+      where: {
+        classPeriodId: dto.classPeriodId,
+        date: dateOnly,
+        enrollmentId: { in: enrollments.map(e => e.id) } // Filtramos solo a los de este curso
+      }
+    });
+
+    // 4. Fusionar los datos: El alumno + Su Estado (Si no escaneó, es PENDING)
+    const monitorData = enrollments.map(enrollment => {
+      const record = attendanceRecords.find(r => r.enrollmentId === enrollment.id);
+      
+      const firstName = enrollment.student.names.split(' ')[0];
+      const lastName = enrollment.student.lastNamePaterno || '';
+
+      return {
+        enrollmentId: enrollment.id,
+        studentId: enrollment.student.id,
+        fullName: `${lastName} ${enrollment.student.lastNameMaterno || ''} ${firstName}`.trim(),
+        // Si hay registro, devolvemos el estado. Si no, devolvemos 'PENDING' (Falta escanear)
+        status: record ? record.status : 'PENDING', 
+        method: record ? record.method : null,
+        timestamp: record ? record.timestamp : null,
+      };
+    });
+
+    // Ordenar alfabéticamente por apellido
+    monitorData.sort((a, b) => a.fullName.localeCompare(b.fullName));
+
+    return {
+      data: monitorData,
+      summary: {
+        total: monitorData.length,
+        present: monitorData.filter(m => m.status === AttendanceStatus.PRESENT).length,
+        late: monitorData.filter(m => m.status === AttendanceStatus.LATE).length,
+        absent: monitorData.filter(m => m.status === AttendanceStatus.ABSENT).length,
+        pending: monitorData.filter(m => m.status === 'PENDING').length,
+      }
+    };
+  }
+
+  // ==========================================
+  // 🛠️ EL PLAN B: MARCADO MANUAL (Upsert)
+  // ==========================================
+
+  async markManualAttendance(dto: import('./dto/manual-attendance.dto').ManualAttendanceDto, teacherId: string) {
+    const now = new Date();
+    const dateOnly = new Date(now.toISOString().split('T')[0]);
+
+    // Usamos UPSERT: Si ya tenía asistencia (ej. pasó su QR pero la máquina se equivocó), lo actualizamos.
+    // Si no tenía, lo creamos.
+    const record = await this.prisma.attendanceRecord.upsert({
+      where: {
+        enrollmentId_classPeriodId_date: {
+          enrollmentId: dto.enrollmentId,
+          classPeriodId: dto.classPeriodId,
+          date: dateOnly,
+        }
+      },
+      update: {
+        status: dto.status,
+        method: AttendanceMethod.MANUAL,
+        markedById: teacherId,
+        timestamp: now,
+      },
+      create: {
+        enrollmentId: dto.enrollmentId,
+        classPeriodId: dto.classPeriodId,
+        date: dateOnly,
+        status: dto.status,
+        method: AttendanceMethod.MANUAL,
+        markedById: teacherId,
+        timestamp: now,
+      }
+    });
+
+    return { data: record, message: `Asistencia marcada como ${dto.status}` };
+  }
 }
