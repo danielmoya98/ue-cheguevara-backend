@@ -15,6 +15,7 @@ import { InstitutionsService } from './institutions.service';
 import { CreateInstitutionDto } from './dto/create-institution.dto';
 import { UpdateInstitutionDto } from './dto/update-institution.dto';
 import { UpdateCampaignSettingsDto } from './dto/update-campaign-settings.dto';
+import { UpdateAttendanceSettingsDto } from './dto/update-attendance-settings.dto'; // <-- Importa el DTO nuevo
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -27,7 +28,6 @@ import {
   CACHE_MANAGER,
 } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
-import { UpdateAttendanceSettingsDto } from './dto/update-attendance-settings.dto'; // <-- Importa el DTO nuevo
 
 @ApiTags('Institución (RUE)')
 @ApiCookieAuth('uecg_access_token')
@@ -40,12 +40,12 @@ export class InstitutionsController {
   ) {}
 
   // ==========================================
-  // 🔥 PANEL DE CAMPAÑA RUDE (OMNICANAL)
+  // 🔥 1. RUTAS ESTÁTICAS (SIEMPRE VAN PRIMERO)
   // ==========================================
 
+  // --- PANEL DE CAMPAÑA RUDE ---
   @Get('campaign-settings')
   @ApiOperation({ summary: 'Obtiene el estado actual de la campaña RUDE' })
-  // Sin caché para que la Directora vea el estado real al instante
   getCampaignSettings() {
     return this.institutionsService.getCampaignSettings();
   }
@@ -59,8 +59,24 @@ export class InstitutionsController {
     return result;
   }
 
+  // --- REGLAS DE ASISTENCIA ---
+  @Get('attendance-settings')
+  @ApiOperation({ summary: 'Obtiene las reglas de asistencia' })
+  getAttendanceSettings() {
+    return this.institutionsService.getAttendanceSettings();
+  }
+
+  @Patch('attendance-settings')
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Actualiza las reglas de asistencia' })
+  async updateAttendanceSettings(@Body() body: UpdateAttendanceSettingsDto) {
+    const result = await this.institutionsService.updateAttendanceSettings(body);
+    await this.cacheManager.clear();
+    return result;
+  }
+
   // ==========================================
-  // GESTIÓN DE INSTITUCIÓN (RUE)
+  // 📦 2. RUTAS DINÁMICAS Y CRUD (VAN AL FINAL)
   // ==========================================
 
   @Post()
@@ -95,21 +111,6 @@ export class InstitutionsController {
   async update(@Param('id') id: string, @Body() updateInstitutionDto: UpdateInstitutionDto, @Req() req: any) {
     updateInstitutionDto.directorId = req.user.userId;
     const result = await this.institutionsService.update(id, updateInstitutionDto);
-    await this.cacheManager.clear();
-    return result;
-  }
-
-  @Get('attendance-settings')
-  @ApiOperation({ summary: 'Obtiene las reglas de asistencia' })
-  getAttendanceSettings() {
-    return this.institutionsService.getAttendanceSettings();
-  }
-
-  @Patch('attendance-settings')
-  @Roles(Role.ADMIN)
-  @ApiOperation({ summary: 'Actualiza las reglas de asistencia' })
-  async updateAttendanceSettings(@Body() body: UpdateAttendanceSettingsDto) {
-    const result = await this.institutionsService.updateAttendanceSettings(body);
     await this.cacheManager.clear();
     return result;
   }

@@ -22,6 +22,8 @@ import { DataUpdatesModule } from './data-updates/data-updates.module';
 import { FirebaseModule } from './firebase/firebase.module'; // 🔥 IMPORTACIÓN NUEVA
 import { GuardiansModule } from './guardians/guardians.module';
 import { IdentityModule } from './identity/identity.module';
+import { AttendanceModule } from './attendance/attendance.module';
+
 @Module({
   imports: [
     ScheduleModule.forRoot(),
@@ -66,6 +68,7 @@ import { IdentityModule } from './identity/identity.module';
     DataUpdatesModule,
     GuardiansModule,
     IdentityModule,
+    AttendanceModule,
   ],
   controllers: [AppController],
   providers: [AppService],

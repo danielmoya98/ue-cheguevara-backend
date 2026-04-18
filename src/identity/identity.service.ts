@@ -62,4 +62,40 @@ export class IdentityService {
       status: 'processing' 
     };
   }
+
+
+  async validateQrToken(scannedToken: string): Promise<string> {
+    const [studentId, versionStr, hash] = scannedToken.split(':');
+    
+    if (!studentId || !versionStr || !hash) {
+      throw new InternalServerErrorException('Formato de QR inválido');
+    }
+
+    // 1. Verificamos la firma criptográfica
+    const payload = `${studentId}:${versionStr}`;
+    const expectedHash = crypto
+      .createHmac('sha256', this.SECRET_KEY)
+      .update(payload)
+      .digest('hex')
+      .slice(0, 10);
+
+    if (hash !== expectedHash) {
+      throw new InternalServerErrorException('Firma de QR adulterada (Posible Fraude)');
+    }
+
+    // 2. Verificamos que la versión no haya sido revocada
+    const student = await this.prisma.student.findUnique({
+      where: { id: studentId },
+      select: { qrTokenVersion: true }
+    });
+
+    if (!student) throw new NotFoundException('Estudiante no encontrado');
+    
+    if (student.qrTokenVersion !== parseInt(versionStr, 10)) {
+      throw new InternalServerErrorException('Este Carnet ha sido REVOCADO. Retenga el carnet.');
+    }
+
+    return studentId;
+  }
+  
 }
