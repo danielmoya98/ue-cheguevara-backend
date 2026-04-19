@@ -2,7 +2,9 @@ import { Injectable, NotFoundException, BadRequestException, Logger, InternalSer
 import { PrismaService } from '../prisma/prisma.service';
 import { IdentityService } from '../identity/identity.service';
 import { RegisterAttendanceDto } from './dto/register-attendance.dto';
-import { AttendanceStatus, AttendanceMethod } from '../../prisma/generated/client';
+import { AttendanceStatus, AttendanceMethod, NotificationFrequency } from '../../prisma/generated/client';
+// 🔥 IMPORTAMOS EL SERVICIO DE FIREBASE
+import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
 export class AttendanceService {
@@ -11,6 +13,8 @@ export class AttendanceService {
   constructor(
     private prisma: PrismaService,
     private identityService: IdentityService,
+    // 🔥 INYECTAMOS FIREBASE
+    private firebaseService: FirebaseService,
   ) {}
 
   async registerScan(dto: RegisterAttendanceDto, teacherId: string) {
@@ -38,7 +42,7 @@ export class AttendanceService {
     if (!classPeriod) throw new NotFoundException('Periodo de clase no encontrado.');
     if (!institution) throw new InternalServerErrorException('Reglas de institución no configuradas.');
 
-    // 4. Time Matcher: Calcular si es Presente, Atraso o Falta
+    // 4. Time Matcher: Calcular si es Presente, Atraso o Falta (AQUÍ APLICA LA TOLERANCIA)
     const status = this.calculateAttendanceStatus(
       classPeriod.startTime,
       institution.lateToleranceMinutes,
@@ -47,10 +51,10 @@ export class AttendanceService {
 
     // 5. El Timestamp exacto y la Fecha pura (para agrupar en DB)
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0]; // "2026-04-18"
-    const dateOnly = new Date(todayStr); // Fecha a las 00:00:00
+    const todayStr = now.toISOString().split('T')[0];
+    const dateOnly = new Date(todayStr);
 
-    // 6. Guardar en Base de Datos (Con protección Anti-Spam / Idempotencia)
+    // 6. Guardar en Base de Datos
     try {
       await this.prisma.attendanceRecord.create({
         data: {
@@ -63,17 +67,19 @@ export class AttendanceService {
           markedById: teacherId,
         },
       });
+
+      // 🔥 7. DISPARADOR INTELIGENTE DE NOTIFICACIONES PUSH (Asíncrono)
+      this.processSmartNotification(enrollment.id, status, now, institution).catch(e => 
+        this.logger.error('Error enviando Push de asistencia QR', e)
+      );
+
     } catch (error) {
-      // P2002 = Violación de Unique Constraint (Ya escaneó en esta clase hoy)
       if (error.code === 'P2002') {
         this.logger.warn(`Escaneo duplicado ignorado para ${enrollment.student.names}`);
-        // Retornamos 200 OK igual para que el escáner no muestre error rojo al profesor
         return this.buildScannerResponse(enrollment.student, status, 'Ya Registrado');
       }
       throw error;
     }
-
-    // 7. (Opcional Futuro): Aquí dispararíamos la notificación Push a la App de Padres con BullMQ
 
     return this.buildScannerResponse(enrollment.student, status, 'Asistencia Exitosa');
   }
@@ -86,7 +92,6 @@ export class AttendanceService {
     const now = new Date();
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-    // startTimeStr es "08:00"
     const [startH, startM] = startTimeStr.split(':').map(Number);
     const startTotalMinutes = startH * 60 + startM;
 
@@ -98,7 +103,6 @@ export class AttendanceService {
   }
 
   private buildScannerResponse(student: any, status: AttendanceStatus, message: string) {
-    // Formateamos el nombre: "Daniel Moya"
     const firstName = student.names.split(' ')[0];
     const lastName = student.lastNamePaterno || '';
     
@@ -113,32 +117,19 @@ export class AttendanceService {
     };
   }
 
- 
   // ==========================================
   // 🔥 MONITOR EN VIVO (Admin y Docentes)
   // ==========================================
   
   async getDailyMonitor(dto: { classroomId: string, classPeriodId: string, date?: string }) {
-    // 🎤 1. LOG DE DEPURACIÓN: ¿Qué ID nos pide el frontend?
-    console.log(`🔍 [MONITOR] Frontend solicita ver el curso ID: ${dto.classroomId}`);
-
-    // 1. Resolver la fecha (Si no envían, es hoy)
     const targetDate = dto.date ? new Date(dto.date) : new Date();
     const dateOnly = new Date(targetDate.toISOString().split('T')[0]);
 
-    // 2. Traer a TODOS los alumnos inscritos en ese curso
     const enrollments = await this.prisma.enrollment.findMany({
-      where: { 
-        classroomId: dto.classroomId, 
-        status: 'INSCRITO' 
-      },
+      where: { classroomId: dto.classroomId, status: 'INSCRITO' },
       include: { student: true }
     });
 
-    // 🎤 2. LOG DE DEPURACIÓN: ¿Cuántos encontró Prisma?
-    console.log(`✅ [MONITOR] Prisma encontró ${enrollments.length} alumnos inscritos para ese ID.`);
-
-    // 🛡️ Si no hay alumnos, devolvemos la estructura completa pero en ceros
     if (enrollments.length === 0) {
       return { 
         data: [], 
@@ -147,19 +138,16 @@ export class AttendanceService {
       };
     }
 
-    // 3. Traer los registros de asistencia que YA EXISTEN para esa hora y día
     const attendanceRecords = await this.prisma.attendanceRecord.findMany({
       where: {
         classPeriodId: dto.classPeriodId,
         date: dateOnly,
-        enrollmentId: { in: enrollments.map(e => e.id) } // Filtramos solo a los de este curso
+        enrollmentId: { in: enrollments.map(e => e.id) }
       }
     });
 
-    // 4. Fusionar los datos: El alumno + Su Estado (Si no escaneó, es PENDING)
     const monitorData = enrollments.map(enrollment => {
       const record = attendanceRecords.find(r => r.enrollmentId === enrollment.id);
-      
       const firstName = enrollment.student.names.split(' ')[0];
       const lastName = enrollment.student.lastNamePaterno || '';
 
@@ -167,14 +155,12 @@ export class AttendanceService {
         enrollmentId: enrollment.id,
         studentId: enrollment.student.id,
         fullName: `${lastName} ${enrollment.student.lastNameMaterno || ''} ${firstName}`.trim(),
-        // Si hay registro, devolvemos el estado. Si no, devolvemos 'PENDING' (Falta escanear)
         status: record ? record.status : 'PENDING', 
         method: record ? record.method : null,
         timestamp: record ? record.timestamp : null,
       };
     });
 
-    // Ordenar alfabéticamente por apellido
     monitorData.sort((a, b) => a.fullName.localeCompare(b.fullName));
 
     return {
@@ -197,8 +183,10 @@ export class AttendanceService {
     const now = new Date();
     const dateOnly = new Date(now.toISOString().split('T')[0]);
 
-    // Usamos UPSERT: Si ya tenía asistencia (ej. pasó su QR pero la máquina se equivocó), lo actualizamos.
-    // Si no tenía, lo creamos.
+    // 🔥 Buscamos las reglas de la institución para poder notificar correctamente
+    const institution = await this.prisma.institution.findFirst();
+    if (!institution) throw new InternalServerErrorException('Reglas de institución no configuradas.');
+
     const record = await this.prisma.attendanceRecord.upsert({
       where: {
         enrollmentId_classPeriodId_date: {
@@ -224,6 +212,11 @@ export class AttendanceService {
       }
     });
 
+    // 🔥 DISPARADOR INTELIGENTE DE NOTIFICACIONES PUSH (Asíncrono)
+    this.processSmartNotification(dto.enrollmentId, dto.status, now, institution).catch(e => 
+      this.logger.error('Error enviando Push de asistencia Manual', e)
+    );
+
     return { data: record, message: `Asistencia marcada como ${dto.status}` };
   }
 
@@ -231,7 +224,6 @@ export class AttendanceService {
   // 🏥 MÓDULO DE LICENCIAS Y JUSTIFICACIONES
   // ==========================================
 
-  // 1. Buscar historial de "conflictos" (Faltas/Atrasos) de un alumno
   async getStudentAttendanceHistory(enrollmentId: string) {
     return this.prisma.attendanceRecord.findMany({
       where: {
@@ -245,7 +237,6 @@ export class AttendanceService {
     });
   }
 
-  // 2. Justificar una falta existente o crear una licencia nueva
   async justifyAttendance(recordId: string, justification: string, adminId: string) {
     const record = await this.prisma.attendanceRecord.findUnique({ where: { id: recordId } });
     if (!record) throw new NotFoundException('El registro de asistencia no existe.');
@@ -255,14 +246,13 @@ export class AttendanceService {
       data: {
         status: AttendanceStatus.EXCUSED,
         justification: justification,
-        markedById: adminId, // Guardamos quién autorizó
+        markedById: adminId, 
         method: AttendanceMethod.MANUAL,
         updatedAt: new Date()
       }
     });
   }
 
-  // 3. Licencia Anticipada (Ej: El alumno avisa que no vendrá mañana)
   async createPreemptiveExcuse(dto: { enrollmentId: string, classPeriodId: string, date: string, reason: string }, adminId: string) {
     const dateOnly = new Date(dto.date);
     
@@ -290,5 +280,83 @@ export class AttendanceService {
       }
     });
   }
-  
+
+  // ==========================================
+  // 🧠 EL CEREBRO OMNICANAL DE NOTIFICACIONES PUSH
+  // ==========================================
+  private async processSmartNotification(enrollmentId: string, status: AttendanceStatus, scanTime: Date, institution: any) {
+    let shouldNotify = false;
+
+    // 1. EVALUAR LA REGLA DE LA DIRECTORA
+    switch (institution.notificationFrequency) {
+      case NotificationFrequency.PER_CLASS:
+        // Notificar en cada clase, sin importar si llegó a tiempo o tarde
+        shouldNotify = true;
+        break;
+
+      case NotificationFrequency.ALERTS_ONLY:
+        // Solo notificar si hay problemas (Atraso o Falta)
+        if (status === AttendanceStatus.LATE || status === AttendanceStatus.ABSENT) {
+          shouldNotify = true;
+        }
+        break;
+
+      case NotificationFrequency.ENTRY_EXIT:
+        // Notificar solo el PRIMER registro del día (Entrada)
+        const dateOnly = new Date(scanTime.toISOString().split('T')[0]);
+        const recordsToday = await this.prisma.attendanceRecord.count({
+          where: { enrollmentId, date: dateOnly }
+        });
+        
+        // Si el conteo es <= 1, significa que este es el primer registro que se acaba de guardar
+        if (recordsToday <= 1) {
+          shouldNotify = true;
+        }
+        break;
+    }
+
+    // Si la regla dice que no debemos notificar, cortamos la ejecución para ahorrar recursos
+    if (!shouldNotify) return;
+
+    // 2. BUSCAR LOS TOKENS DEL PADRE
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+      include: { student: { include: { guardians: { include: { guardian: { include: { user: true } } } } } } }
+    });
+
+    if (!enrollment || !enrollment.student.guardians) return;
+
+    const fcmTokens = new Set<string>();
+    enrollment.student.guardians.forEach((g: any) => {
+      if (g.guardian.user?.fcmTokens) {
+        g.guardian.user.fcmTokens.forEach((token: string) => fcmTokens.add(token));
+      }
+    });
+
+    const tokensArray = Array.from(fcmTokens);
+    if (tokensArray.length === 0) return; // Si los papás no tienen la App instalada, no se envía nada.
+
+    // 3. ARMAR EL MENSAJE DINÁMICO
+    const firstName = enrollment.student.names.split(' ')[0];
+    const timeStr = scanTime.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' });
+    
+    let title = 'Control de Ingreso 🏫';
+    let body = `${firstName} ha marcado asistencia a las ${timeStr}.`;
+
+    if (status === AttendanceStatus.LATE) {
+      title = 'Aviso de Atraso ⏰';
+      body = `${firstName} ingresó con atraso a las ${timeStr}.`;
+    } else if (status === AttendanceStatus.ABSENT) {
+      title = 'Aviso de Inasistencia ⚠️';
+      body = `${firstName} ha sido marcado como Ausente a las ${timeStr}.`;
+    }
+
+    // 4. DISPARAR A FIREBASE
+    await this.firebaseService.sendMulticastNotification(
+      tokensArray, 
+      title, 
+      body, 
+      { type: 'ATTENDANCE_UPDATE', status: status }
+    );
+  }
 }
