@@ -226,4 +226,69 @@ export class AttendanceService {
 
     return { data: record, message: `Asistencia marcada como ${dto.status}` };
   }
+
+  // ==========================================
+  // 🏥 MÓDULO DE LICENCIAS Y JUSTIFICACIONES
+  // ==========================================
+
+  // 1. Buscar historial de "conflictos" (Faltas/Atrasos) de un alumno
+  async getStudentAttendanceHistory(enrollmentId: string) {
+    return this.prisma.attendanceRecord.findMany({
+      where: {
+        enrollmentId,
+        status: { in: [AttendanceStatus.ABSENT, AttendanceStatus.LATE] }
+      },
+      include: {
+        classPeriod: { select: { name: true, startTime: true } },
+      },
+      orderBy: { date: 'desc' }
+    });
+  }
+
+  // 2. Justificar una falta existente o crear una licencia nueva
+  async justifyAttendance(recordId: string, justification: string, adminId: string) {
+    const record = await this.prisma.attendanceRecord.findUnique({ where: { id: recordId } });
+    if (!record) throw new NotFoundException('El registro de asistencia no existe.');
+
+    return this.prisma.attendanceRecord.update({
+      where: { id: recordId },
+      data: {
+        status: AttendanceStatus.EXCUSED,
+        justification: justification,
+        markedById: adminId, // Guardamos quién autorizó
+        method: AttendanceMethod.MANUAL,
+        updatedAt: new Date()
+      }
+    });
+  }
+
+  // 3. Licencia Anticipada (Ej: El alumno avisa que no vendrá mañana)
+  async createPreemptiveExcuse(dto: { enrollmentId: string, classPeriodId: string, date: string, reason: string }, adminId: string) {
+    const dateOnly = new Date(dto.date);
+    
+    return this.prisma.attendanceRecord.upsert({
+      where: {
+        enrollmentId_classPeriodId_date: {
+          enrollmentId: dto.enrollmentId,
+          classPeriodId: dto.classPeriodId,
+          date: dateOnly
+        }
+      },
+      update: {
+        status: AttendanceStatus.EXCUSED,
+        justification: dto.reason,
+        markedById: adminId
+      },
+      create: {
+        enrollmentId: dto.enrollmentId,
+        classPeriodId: dto.classPeriodId,
+        date: dateOnly,
+        status: AttendanceStatus.EXCUSED,
+        justification: dto.reason,
+        markedById: adminId,
+        method: AttendanceMethod.MANUAL
+      }
+    });
+  }
+  
 }

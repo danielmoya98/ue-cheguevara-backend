@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Req, UseGuards, HttpCode, HttpStatus, Get, Query } from '@nestjs/common';
+import { Controller, Post,Patch ,Body, Req, UseGuards, HttpCode, HttpStatus, Get, Query, Param } from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { RegisterAttendanceDto } from './dto/register-attendance.dto';
 import { AuthGuard } from '@nestjs/passport';
@@ -42,6 +42,24 @@ export class AttendanceController {
   async markManualAttendance(@Body() dto: ManualAttendanceDto, @Req() req: any) {
     // req.user.userId es el UUID del Admin o Docente que hizo clic en el botón
     return this.attendanceService.markManualAttendance(dto, req.user.userId);
+  }
+
+  @Get('history/:enrollmentId')
+  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @ApiOperation({ summary: 'Obtiene historial de faltas/atrasos para justificar' })
+  async getHistory(@Param('enrollmentId') enrollmentId: string) {
+    return this.attendanceService.getStudentAttendanceHistory(enrollmentId);
+  }
+
+  @Patch('justify/:id')
+  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @ApiOperation({ summary: 'Convierte una falta/atraso en Licencia (EXCUSED)' })
+  async justify(
+    @Param('id') id: string, 
+    @Body('justification') justification: string, 
+    @Req() req: any
+  ) {
+    return this.attendanceService.justifyAttendance(id, justification, req.user.userId);
   }
   
 }
