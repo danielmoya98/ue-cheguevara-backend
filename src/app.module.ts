@@ -20,6 +20,7 @@ import { GuardiansModule } from './guardians/guardians.module';
 import { IdentityModule } from './identity/identity.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ClassPeriodsModule } from './class-periods/class-periods.module';
+import { GradesModule } from './grades/grades.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { ClassPeriodsModule } from './class-periods/class-periods.module';
     IdentityModule,
     AttendanceModule,
     ClassPeriodsModule,
+    GradesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

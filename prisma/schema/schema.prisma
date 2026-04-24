@@ -121,6 +121,7 @@ model User {
 
   // 🔥 CORRECCIÓN: Relación exacta para saber qué profesor tomó la lista
   attendancesMarked AttendanceRecord[] @relation("AttendanceMarker")
+  grades            Grade[]
 
   @@map("users")
 }
@@ -202,6 +203,7 @@ model AcademicYear {
   createdAt   DateTime     @default(now()) @map("created_at")
   updatedAt   DateTime     @updatedAt @map("updated_at")
   enrollments Enrollment[]
+  trimesters  Trimester[]
 
   @@map("academic_years")
 }
@@ -271,6 +273,7 @@ model TeacherAssignment {
   createdAt     DateTime       @default(now()) @map("created_at")
   updatedAt     DateTime       @updatedAt @map("updated_at")
   scheduleSlots ScheduleSlot[]
+  grades        Grade[]
 
   @@unique([classroomId, subjectId])
   @@map("teacher_assignments")
@@ -395,7 +398,7 @@ model Student {
   talentIQ               String?
   talentModality         String[]
 
-  qrTokenVersion Int @default(1) @map("qr_token_version")
+  qrTokenVersion Int     @default(1) @map("qr_token_version")
   // 🔥 NUEVO: Control de estado del carnet
   hasActiveQr    Boolean @default(false) @map("has_active_qr")
 
@@ -433,6 +436,7 @@ model Enrollment {
   updateRequests  DataUpdateRequest[]
 
   attendanceRecords AttendanceRecord[]
+  grades            Grade[]
 
   @@unique([studentId, academicYearId])
 }
@@ -653,4 +657,92 @@ model AttendanceRecord {
 
   @@unique([enrollmentId, classPeriodId, date])
   @@map("attendance_records")
+}
+
+// ==========================================
+// MÓDULO 5: CALIFICACIONES Y RENDIMIENTO
+// ==========================================
+
+enum TrimesterName {
+  PRIMER_TRIMESTRE
+  SEGUNDO_TRIMESTRE
+  TERCER_TRIMESTRE
+}
+
+enum GradeStatus {
+  DRAFT // Borrador (el docente está editando)
+  PUBLISHED // Publicado (visible para padres/director)
+  LOCKED // Trimestre cerrado (Inmutable)
+}
+
+// 1. EL TRIMESTRE (Control de Tiempos)
+model Trimester {
+  id             String        @id @default(uuid())
+  academicYearId String        @map("academic_year_id")
+  name           TrimesterName
+  startDate      DateTime      @map("start_date")
+  endDate        DateTime      @map("end_date")
+  isOpen         Boolean       @default(false) @map("is_open")
+
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id])
+  grades       Grade[]
+
+  @@unique([academicYearId, name])
+  @@map("trimesters")
+}
+
+// 2. LA CALIFICACIÓN CONSOLIDADA (Modelo Boliviano)
+model Grade {
+  id                  String @id @default(uuid())
+  enrollmentId        String @map("enrollment_id")
+  teacherAssignmentId String @map("teacher_assignment_id")
+  trimesterId         String @map("trimester_id")
+
+  // Dimensiones de la Ley 070
+  scoreSer   Int? @map("score_ser") // Max 10
+  scoreSaber Int? @map("score_saber") // Max 45
+  scoreHacer Int? @map("score_hacer") // Max 40
+  scoreAuto  Int? @map("score_auto") // Max 5
+
+  // Motor Backend (Calculados automáticamente, NO insertados por frontend)
+  totalScore    Int? @map("total_score") // Suma total (Max 100)
+  recoveryScore Int? @map("recovery_score") // Nota de reforzamiento (Si totalScore < 51)
+  finalScore    Int? @map("final_score") // Nota definitiva legal aplicable
+
+  status GradeStatus @default(DRAFT)
+
+  // Auditoría
+  lastModifiedById String?  @map("last_modified_by_id")
+  lastModifiedAt   DateTime @default(now()) @updatedAt @map("last_modified_at")
+
+  // Relaciones
+  enrollment          Enrollment           @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
+  teacherAssignment   TeacherAssignment    @relation(fields: [teacherAssignmentId], references: [id], onDelete: Cascade)
+  trimester           Trimester            @relation(fields: [trimesterId], references: [id], onDelete: Cascade)
+  modifier            User?                @relation(fields: [lastModifiedById], references: [id])
+  gradeChangeRequests GradeChangeRequest[]
+
+  @@unique([enrollmentId, teacherAssignmentId, trimesterId]) // Solo 1 registro oficial por alumno/materia/trimestre
+  @@map("grades")
+}
+
+// 3. DESCONGELAMIENTO DE NOTAS (Change Requests)
+model GradeChangeRequest {
+  id            String  @id @default(uuid())
+  gradeId       String  @map("grade_id")
+  requestedById String  @map("requested_by_id") // Profesor
+  approvedById  String? @map("approved_by_id") // Director
+
+  reason        String @db.Text
+  proposedSer   Int?
+  proposedSaber Int?
+  proposedHacer Int?
+  proposedAuto  Int?
+
+  status     UpdateRequestStatus @default(PENDING) // Reusamos tu enum de PENDING, APPROVED, REJECTED
+  resolvedAt DateTime?
+
+  grade Grade @relation(fields: [gradeId], references: [id])
+
+  @@map("grade_change_requests")
 }
