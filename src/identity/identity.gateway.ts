@@ -1,9 +1,9 @@
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server } from 'socket.io';
-
+import { getCorsConfig } from '../common/configs/cors.config';
 @WebSocketGateway({
   cors: {
-    origin: ['http://localhost:3000'], // Añade aquí tu dominio de Vercel cuando lo subas
+    origin: getCorsConfig().origin,
     methods: ['GET', 'POST'],
     credentials: true,
   },
