@@ -32,20 +32,41 @@ export class AuditInterceptor implements NestInterceptor {
       // 2. Si la acción fue EXITOSA
       tap(async () => {
         const statusCode = response.statusCode;
-        await this.logToDatabase(request, statusCode, method, originalUrl, ip, userAgent);
+        await this.logToDatabase(
+          request,
+          statusCode,
+          method,
+          originalUrl,
+          ip,
+          userAgent,
+        );
       }),
       // 3. Si la acción produjo un ERROR (ej. 403 Forbidden o 400 Bad Request)
       catchError((err) => {
         const statusCode = err.status || 500;
-        this.logToDatabase(request, statusCode, method, originalUrl, ip, userAgent).catch(e => 
-          this.logger.error('Fallo crítico al guardar log de error', e)
+        this.logToDatabase(
+          request,
+          statusCode,
+          method,
+          originalUrl,
+          ip,
+          userAgent,
+        ).catch((e) =>
+          this.logger.error('Fallo crítico al guardar log de error', e),
         );
         return throwError(() => err);
       }),
     );
   }
 
-  private async logToDatabase(req: any, statusCode: number, method: string, route: string, ip: string, userAgent: string) {
+  private async logToDatabase(
+    req: any,
+    statusCode: number,
+    method: string,
+    route: string,
+    ip: string,
+    userAgent: string,
+  ) {
     // Si la ruta está protegida, el JwtAuthGuard ya inyectó el usuario aquí
     const userId = req.user?.id || null;
 

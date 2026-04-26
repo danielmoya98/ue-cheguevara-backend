@@ -15,15 +15,16 @@ export class PermissionsSyncService implements OnModuleInit {
   async sync() {
     this.logger.log('🔄 Sincronizando catálogo de permisos con la DB...');
 
-    // 1. Extraemos los strings y sincronizamos la tabla de permisos
+    // =========================================================
+    // 1. SINCRONIZAR CATÁLOGO GLOBAL DE PERMISOS
+    // =========================================================
     const permissionStrings = Object.values(SystemPermissions);
 
     for (const p of permissionStrings) {
       const [action, subject] = p.split(':');
-
       await this.prisma.permission.upsert({
         where: { action_subject: { action, subject } },
-        update: {}, // No cambia nada si ya existe
+        update: {},
         create: {
           action,
           subject,
@@ -34,41 +35,121 @@ export class PermissionsSyncService implements OnModuleInit {
     this.logger.log('✅ Catálogo de permisos actualizado.');
 
     // =========================================================
-    // 🔥 SOLUCIÓN A LA PARADOJA DEL PRIMER ADMINISTRADOR
+    // 2. CONFIGURACIÓN DE ROLES FUNDACIONALES (Factory Defaults)
     // =========================================================
-    this.logger.log('🛡️ Asegurando privilegios del SUPER_ADMIN...');
+    this.logger.log(
+      '🛡️ Sembrando roles estructurales y privilegios iniciales...',
+    );
 
-    // 2. Garantizamos que el rol SUPER_ADMIN exista (lo crea si no existe)
-    const superAdminRole = await this.prisma.role.upsert({
-      where: { name: 'SUPER_ADMIN' },
-      update: {}, 
-      create: {
+    // Obtenemos todos los permisos recién guardados de la base de datos
+    const allDbPermissions = await this.prisma.permission.findMany();
+
+    // Helper para buscar los IDs de los permisos según sus códigos exactos
+    const getPermIds = (requiredPerms: string[]) => {
+      return allDbPermissions
+        .filter((dbPerm) =>
+          requiredPerms.includes(`${dbPerm.action}:${dbPerm.subject}`),
+        )
+        .map((p) => p.id);
+    };
+
+    // Definición de la "Receta" de accesos para cada rol
+    const rolesConfig = [
+      {
         name: 'SUPER_ADMIN',
         description: 'Administrador Supremo del Sistema (Root)',
+        // Poder absoluto: Le damos TODOS los IDs de la base de datos
+        permissionIds: allDbPermissions.map((p) => p.id),
       },
-    });
+      {
+        name: 'DIRECTOR',
+        description: 'Máxima Autoridad Pedagógica y Administrativa',
+        // Le damos autonomía total, excluyendo borrar el año, borrar matrículas o el manage:all
+        permissionIds: getPermIds([
+          SystemPermissions.USERS_READ,
+          SystemPermissions.USERS_WRITE,
+          SystemPermissions.IDENTITY_READ,
+          SystemPermissions.IDENTITY_WRITE,
+          SystemPermissions.IDENTITY_EXPORT,
+          SystemPermissions.INSTITUTION_WRITE,
+          SystemPermissions.PHYSICAL_SPACES_WRITE,
+          SystemPermissions.ACADEMIC_YEARS_CREATE,
+          SystemPermissions.ACADEMIC_YEARS_UPDATE,
+          SystemPermissions.TRIMESTERS_WRITE,
+          SystemPermissions.CLASS_PERIODS_CREATE,
+          SystemPermissions.CLASS_PERIODS_UPDATE,
+          SystemPermissions.CLASS_PERIODS_DELETE,
+          SystemPermissions.CLASSROOMS_CREATE,
+          SystemPermissions.CLASSROOMS_UPDATE,
+          SystemPermissions.CLASSROOMS_DELETE,
+          SystemPermissions.SUBJECTS_WRITE,
+          SystemPermissions.TEACHER_ASSIGNMENTS_READ,
+          SystemPermissions.TEACHER_ASSIGNMENTS_WRITE,
+          SystemPermissions.TIMETABLES_READ,
+          SystemPermissions.TIMETABLES_WRITE,
+          SystemPermissions.STUDENTS_WRITE,
+          SystemPermissions.ENROLLMENTS_READ,
+          SystemPermissions.ENROLLMENTS_WRITE,
+          SystemPermissions.GRADES_READ,
+          SystemPermissions.GRADES_WRITE,
+          SystemPermissions.ATTENDANCE_READ,
+          SystemPermissions.ATTENDANCE_WRITE,
+          SystemPermissions.ATTENDANCE_JUSTIFY,
+          SystemPermissions.RUDE_READ,
+          SystemPermissions.RUDE_WRITE,
+          SystemPermissions.RUDE_CAMPAIGN,
+          SystemPermissions.RUDE_MASSIVE,
+        ]),
+      },
+      {
+        name: 'DOCENTE',
+        description: 'Plantel Docente (Acceso web y móvil)',
+        // Solo lo estrictamente necesario para su trabajo en el aula
+        permissionIds: getPermIds([
+          SystemPermissions.GRADES_READ,
+          SystemPermissions.GRADES_WRITE,
+          SystemPermissions.ATTENDANCE_READ,
+          SystemPermissions.ATTENDANCE_WRITE,
+          SystemPermissions.TIMETABLES_READ,
+          SystemPermissions.TEACHER_ASSIGNMENTS_READ,
+          SystemPermissions.ENROLLMENTS_READ, // Para que puedan ver la lista de sus alumnos
+        ]),
+      },
+    ];
 
-    // 3. Obtenemos TODOS los permisos recién sincronizados
-    const allPermissions = await this.prisma.permission.findMany({
-      select: { id: true },
-    });
+    // =========================================================
+    // 3. EJECUCIÓN (Crear/Actualizar Roles y Asignar Permisos)
+    // =========================================================
+    for (const config of rolesConfig) {
+      // 3.1 Garantizamos que el rol exista
+      const role = await this.prisma.role.upsert({
+        where: { name: config.name },
+        update: {},
+        create: {
+          name: config.name,
+          description: config.description,
+        },
+      });
 
-    // 4. Mapeamos la data para la tabla intermedia
-    const rolePermissionsData = allPermissions.map((p) => ({
-      roleId: superAdminRole.id,
-      permissionId: p.id,
-    }));
+      // 3.2 Preparamos los datos relacionales
+      const rolePermissionsData = config.permissionIds.map((pId) => ({
+        roleId: role.id,
+        permissionId: pId,
+      }));
 
-    // 5. Transacción: Borramos los permisos viejos del Super Admin y le asignamos TODOS los nuevos
-    await this.prisma.$transaction([
-      this.prisma.rolePermission.deleteMany({
-        where: { roleId: superAdminRole.id },
-      }),
-      this.prisma.rolePermission.createMany({
-        data: rolePermissionsData,
-      }),
-    ]);
+      // 3.3 Transacción: Limpiamos los permisos viejos e insertamos la nueva receta
+      await this.prisma.$transaction([
+        this.prisma.rolePermission.deleteMany({
+          where: { roleId: role.id },
+        }),
+        this.prisma.rolePermission.createMany({
+          data: rolePermissionsData,
+        }),
+      ]);
+    }
 
-    this.logger.log('👑 Privilegios de SUPER_ADMIN garantizados al 100%.');
+    this.logger.log(
+      '👑 Privilegios de SUPER_ADMIN, DIRECTOR y DOCENTE inicializados.',
+    );
   }
 }
