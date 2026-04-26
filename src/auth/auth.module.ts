@@ -5,6 +5,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './strategies/jwt.strategy';
+import { RolesController } from './controllers/roles.controller';
+import { RolesService } from './services/roles.service';
+import { PermissionsSyncService } from './services/permissions-sync.service';
 
 @Module({
   imports: [
@@ -14,7 +17,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
       signOptions: { expiresIn: '8h' }, // La sesión dura un turno laboral (8 horas)
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, PrismaService, JwtStrategy],
+  controllers: [AuthController, RolesController],
+  providers: [
+    AuthService,
+    PrismaService,
+    JwtStrategy,
+    RolesService,
+    PermissionsSyncService,
+  ],
 })
 export class AuthModule {}
