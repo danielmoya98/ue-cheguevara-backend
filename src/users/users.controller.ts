@@ -24,7 +24,7 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency.inter
 import { CacheTTL } from '@nestjs/cache-manager';
 import { UserProfileCacheInterceptor } from '../common/interceptors/user-profile-cache.interceptor';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES SEGURIDAD
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -32,13 +32,13 @@ import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Usuarios')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
+@UseGuards(AuthGuard('jwt'), PermissionsGuard)
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   // =======================================================
-  // ENDPOINTS DE PERFIL CACHEADOS (Acceso Libre)
+  // ENDPOINTS DE PERFIL PERSONAL
   // =======================================================
 
   @Get('profile')
@@ -69,54 +69,58 @@ export class UsersController {
   }
 
   // =======================================================
-  // ENDPOINTS ADMINISTRATIVOS (Protegidos con RBAC)
+  // ENDPOINTS ADMINISTRATIVOS (Jerarquía ABAC activada)
   // =======================================================
 
   @Post()
-  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.USERS_WRITE)
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Crear un nuevo usuario' })
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  create(@Body() createUserDto: CreateUserDto, @Req() req: any) {
+    return this.usersService.create(createUserDto, req.user);
   }
 
   @Get()
-  @RequirePermissions(SystemPermissions.USERS_READ) // 🔥 Solo Admin
-  @ApiOperation({ summary: 'Obtener lista de todos los usuarios paginada' })
-  findAll(@Query() query: PaginationDto) {
-    return this.usersService.findAll(query);
+  @RequirePermissions(SystemPermissions.USERS_READ)
+  @ApiOperation({ summary: 'Obtener lista de usuarios filtrada por jerarquía' })
+  findAll(@Query() query: PaginationDto, @Req() req: any) {
+    return this.usersService.findAll(query, req.user);
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.USERS_WRITE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualizar nombre o rol de un usuario' })
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.usersService.update(id, updateUserDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateUserDto: UpdateUserDto,
+    @Req() req: any,
+  ) {
+    return this.usersService.update(id, updateUserDto, req.user);
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.USERS_WRITE)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Desactivar un usuario por su ID (Soft Delete)' })
-  remove(@Param('id') id: string) {
-    return this.usersService.remove(id);
+  @ApiOperation({ summary: 'Desactivar un usuario (Soft Delete)' })
+  remove(@Param('id') id: string, @Req() req: any) {
+    return this.usersService.remove(id, req.user);
   }
 
   @Patch(':id/reactivate')
-  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.USERS_WRITE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reactivar a un usuario inactivo' })
-  reactivate(@Param('id') id: string) {
-    return this.usersService.reactivate(id);
+  reactivate(@Param('id') id: string, @Req() req: any) {
+    return this.usersService.reactivate(id, req.user);
   }
 
   @Post(':id/reset-password')
-  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.USERS_WRITE)
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Genera una nueva contraseña temporal' })
-  resetPassword(@Param('id') id: string) {
-    return this.usersService.resetPassword(id);
+  resetPassword(@Param('id') id: string, @Req() req: any) {
+    return this.usersService.resetPassword(id, req.user);
   }
 }

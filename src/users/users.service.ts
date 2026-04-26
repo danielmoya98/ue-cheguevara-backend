@@ -4,6 +4,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
@@ -17,7 +18,33 @@ export class UsersService {
   constructor(private prisma: PrismaService) {}
 
   // ==========================================
-  // 1. LÓGICA DE PERFIL PERSONAL (MI CUENTA)
+  // HELPER: VALIDACIÓN DE JERARQUÍA ABAC
+  // ==========================================
+  private validateHierarchy(requestingUser: any, targetUser: any) {
+    const reqRole = requestingUser.role; // Viene del JWT/Guard
+    const targetRoleName = targetUser.role?.name || targetUser.role;
+
+    // 1. Un Super Admin puede gestionar a todos
+    if (reqRole === 'SUPER_ADMIN') return;
+
+    // 2. Si es Director:
+    if (reqRole === 'DIRECTOR') {
+      // PROHIBIDO: Tocar a un Super Admin u otro Director
+      if (['SUPER_ADMIN', 'DIRECTOR'].includes(targetRoleName)) {
+        throw new ForbiddenException(
+          'Jerarquía insuficiente: Un Director no puede gestionar cuentas de nivel administrativo o iguales.',
+        );
+      }
+      return;
+    }
+
+    throw new ForbiddenException(
+      'No tienes permisos para realizar acciones administrativas.',
+    );
+  }
+
+  // ==========================================
+  // 1. LÓGICA DE PERFIL PERSONAL
   // ==========================================
 
   async getProfile(userId: string) {
@@ -32,28 +59,17 @@ export class UsersService {
         phone: true,
         address: true,
         specialty: true,
-        role: { select: { name: true } }, // 🔥 Obtenemos el nombre del rol
+        role: { select: { name: true } },
       },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
-
-    // Aplanamos el rol para mantener el contrato con el Frontend
     return { ...user, role: user.role?.name };
   }
 
   async updateProfile(userId: string, data: UpdateProfileDto) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new NotFoundException('Usuario no encontrado');
-
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        ...(data.fullName !== undefined && { fullName: data.fullName }),
-        ...(data.ci !== undefined && { ci: data.ci }),
-        ...(data.phone !== undefined && { phone: data.phone }),
-        ...(data.address !== undefined && { address: data.address }),
-        ...(data.specialty !== undefined && { specialty: data.specialty }),
-      },
+      data,
       select: {
         id: true,
         fullName: true,
@@ -65,9 +81,8 @@ export class UsersService {
         role: { select: { name: true } },
       },
     });
-
     return {
-      message: 'Perfil actualizado exitosamente',
+      message: 'Perfil actualizado',
       user: { ...updatedUser, role: updatedUser.role?.name },
     };
   }
@@ -95,29 +110,31 @@ export class UsersService {
   }
 
   // ==========================================
-  // 2. LÓGICA ADMINISTRATIVA (PANEL ADMIN)
+  // 2. LÓGICA ADMINISTRATIVA (ABAC PROTECTED)
   // ==========================================
 
-  async create(data: {
-    fullName: string;
-    email: string;
-    passwordRaw: string;
-    role: string;
-  }) {
+  async create(data: any, requestingUser: any) {
+    // 🔥 ABAC: El Director no puede crear roles superiores
+    if (
+      requestingUser.role === 'DIRECTOR' &&
+      ['SUPER_ADMIN', 'DIRECTOR'].includes(data.role)
+    ) {
+      throw new ForbiddenException(
+        'No puedes crear usuarios con rangos administrativos.',
+      );
+    }
+
     const existingUser = await this.prisma.user.findUnique({
       where: { email: data.email },
     });
     if (existingUser)
       throw new ConflictException('El correo ya está registrado');
 
-    // 🔥 Buscamos dinámicamente el ID del rol
     const roleRecord = await this.prisma.role.findUnique({
       where: { name: data.role },
     });
     if (!roleRecord)
-      throw new BadRequestException(
-        `El rol '${data.role}' no existe en el sistema.`,
-      );
+      throw new BadRequestException(`El rol '${data.role}' no existe.`);
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(data.passwordRaw, salt);
@@ -127,7 +144,7 @@ export class UsersService {
         fullName: data.fullName,
         email: data.email,
         password: hashedPassword,
-        roleId: roleRecord.id, // 🔥 Asignación relacional
+        roleId: roleRecord.id,
         requiresPasswordChange: true,
       },
       include: { role: true },
@@ -137,12 +154,16 @@ export class UsersService {
     return { ...result, role: result.role?.name };
   }
 
-  async findAll(query: PaginationDto & { role?: string }) {
-    const { page = 1, limit = 10, search, sort, role } = query;
+  async findAll(query: PaginationDto & { role?: string }, requestingUser: any) {
+    const { page = 1, limit = 10, search, role } = query;
     const skip = (page - 1) * limit;
 
+    // 🔥 FILTRO ABAC: El Director no puede "ver" que existen Super Admins
     const whereCondition: any = {
       AND: [
+        requestingUser.role === 'DIRECTOR'
+          ? { role: { name: { not: 'SUPER_ADMIN' } } }
+          : {},
         search
           ? {
               OR: [
@@ -151,18 +172,9 @@ export class UsersService {
               ],
             }
           : {},
-        role ? { role: { name: role } } : {}, // 🔥 Filtro relacional
+        role ? { role: { name: role } } : {},
       ],
     };
-
-    let orderBy = {};
-    if (sort) {
-      const isDesc = sort.startsWith('-');
-      const field = isDesc ? sort.substring(1) : sort;
-      orderBy = { [field]: isDesc ? 'desc' : 'asc' };
-    } else {
-      orderBy = { createdAt: 'desc' };
-    }
 
     const [total, data] = await Promise.all([
       this.prisma.user.count({ where: whereCondition }),
@@ -170,46 +182,59 @@ export class UsersService {
         where: whereCondition,
         skip,
         take: limit,
-        orderBy,
+        orderBy: { createdAt: 'desc' },
         select: {
           id: true,
           fullName: true,
           email: true,
           status: true,
           lastLoginAt: true,
-          role: { select: { name: true } }, // 🔥 Obtenemos el nombre del rol
+          role: { select: { name: true } },
         },
       }),
     ]);
 
-    // Aplanamos el arreglo para el frontend
-    const mappedData = data.map((u) => ({ ...u, role: u.role?.name }));
-
     return {
-      data: mappedData,
+      data: data.map((u) => ({ ...u, role: u.role?.name })),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
-  async update(id: string, data: UpdateUserDto & { role?: string }) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException(`Usuario no encontrado`);
+  async update(
+    id: string,
+    data: UpdateUserDto & { role?: string },
+    requestingUser: any,
+  ) {
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id },
+      include: { role: true },
+    });
+    if (!targetUser) throw new NotFoundException(`Usuario no encontrado`);
+
+    // 🔥 VALIDACIÓN ABAC
+    this.validateHierarchy(requestingUser, targetUser);
 
     let roleId: string | undefined = undefined;
     if (data.role) {
+      if (
+        requestingUser.role === 'DIRECTOR' &&
+        ['SUPER_ADMIN', 'DIRECTOR'].includes(data.role)
+      ) {
+        throw new ForbiddenException(
+          'No puedes asignar roles administrativos.',
+        );
+      }
       const roleRecord = await this.prisma.role.findUnique({
         where: { name: data.role },
       });
-      if (!roleRecord)
-        throw new BadRequestException(`El rol '${data.role}' no existe.`);
-      roleId = roleRecord.id;
+      roleId = roleRecord?.id;
     }
 
     const updatedUser = await this.prisma.user.update({
       where: { id },
       data: {
         ...(data.fullName !== undefined && { fullName: data.fullName }),
-        ...(roleId !== undefined && { roleId }), // 🔥 Actualización relacional
+        ...(roleId !== undefined && { roleId }),
       },
       select: {
         id: true,
@@ -221,25 +246,36 @@ export class UsersService {
     });
 
     return {
-      message: 'Usuario actualizado exitosamente',
+      message: 'Usuario actualizado',
       user: { ...updatedUser, role: updatedUser.role?.name },
     };
   }
 
-  async remove(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException(`Usuario no encontrado`);
+  async remove(id: string, requestingUser: any) {
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id },
+      include: { role: true },
+    });
+    if (!targetUser) throw new NotFoundException(`Usuario no encontrado`);
+
+    // 🔥 VALIDACIÓN ABAC: El director no puede borrarse a sí mismo ni a sus jefes
+    this.validateHierarchy(requestingUser, targetUser);
 
     await this.prisma.user.update({
       where: { id },
       data: { status: 'INACTIVE' },
     });
-    return { message: 'Usuario desactivado del sistema exitosamente' };
+    return { message: 'Usuario desactivado exitosamente' };
   }
 
-  async reactivate(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException(`Usuario no encontrado`);
+  async reactivate(id: string, requestingUser: any) {
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id },
+      include: { role: true },
+    });
+    if (!targetUser) throw new NotFoundException(`Usuario no encontrado`);
+
+    this.validateHierarchy(requestingUser, targetUser);
 
     await this.prisma.user.update({
       where: { id },
@@ -248,12 +284,14 @@ export class UsersService {
     return { message: 'Usuario reactivado exitosamente' };
   }
 
-  async resetPassword(id: string) {
-    const user = await this.prisma.user.findUnique({
+  async resetPassword(id: string, requestingUser: any) {
+    const targetUser = await this.prisma.user.findUnique({
       where: { id },
       include: { role: true },
     });
-    if (!user) throw new NotFoundException('Usuario no encontrado');
+    if (!targetUser) throw new NotFoundException('Usuario no encontrado');
+
+    this.validateHierarchy(requestingUser, targetUser);
 
     const newRawPassword =
       Math.random().toString(36).slice(-8) + Math.floor(Math.random() * 100);
@@ -266,11 +304,9 @@ export class UsersService {
     });
 
     return {
-      message: 'Credenciales restauradas con éxito',
+      message: 'Credenciales restauradas',
       newPassword: newRawPassword,
-      email: user.email,
-      fullName: user.fullName,
-      role: user.role?.name,
+      fullName: targetUser.fullName,
     };
   }
 }
