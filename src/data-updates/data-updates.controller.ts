@@ -9,10 +9,12 @@ import {
 } from '@nestjs/common';
 import { DataUpdatesService } from './data-updates.service';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+
+// 🔥 IMPORTACIONES RBAC
 import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Actualización de Datos RUDE (Cuarentena)')
 @Controller('data-updates')
@@ -21,8 +23,8 @@ export class DataUpdatesController {
 
   @Post('broadcast/all')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN) // 🔥 OJO: Solo el ADMIN (Director) debería tener poder nuclear
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_MASSIVE) // ☢️ Poder Nuclear
   @ApiOperation({ summary: 'Envía Push a TODOS los padres del colegio' })
   async triggerMassiveCampaign() {
     return this.dataUpdatesService.broadcastToAll();
@@ -55,11 +57,10 @@ export class DataUpdatesController {
 
   @Get('pending')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_READ) // 🔥
   @ApiOperation({
-    summary:
-      'Obtiene todas las solicitudes enviadas por los padres que esperan revisión',
+    summary: 'Obtiene todas las solicitudes que esperan revisión',
   })
   getPendingRequests() {
     return this.dataUpdatesService.getPendingRequests();
@@ -67,20 +68,17 @@ export class DataUpdatesController {
 
   @Post(':id/approve')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
-  @ApiOperation({
-    summary:
-      'Aprueba una solicitud y fusiona los datos con las tablas oficiales',
-  })
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_WRITE) // 🔥
+  @ApiOperation({ summary: 'Aprueba una solicitud y fusiona los datos' })
   approveUpdate(@Param('id') id: string) {
     return this.dataUpdatesService.approveUpdate(id);
   }
 
   @Patch(':id/reject')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_WRITE) // 🔥
   @ApiOperation({ summary: 'Rechaza una solicitud de actualización' })
   rejectUpdate(@Param('id') id: string, @Body('reason') reason: string) {
     return this.dataUpdatesService.rejectUpdate(
@@ -89,62 +87,53 @@ export class DataUpdatesController {
     );
   }
 
+  @Patch(':enrollmentId/mark-physical')
+  @ApiCookieAuth('uecg_access_token')
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_WRITE) // 🔥
+  @ApiOperation({ summary: 'Registra que el padre entregó el RUDE en papel' })
+  markPhysicalDelivery(@Param('enrollmentId') enrollmentId: string) {
+    return this.dataUpdatesService.markPhysicalDelivery(enrollmentId);
+  }
+
   @Post('generate-link/:enrollmentId')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
-  @ApiOperation({
-    summary: 'Genera el enlace seguro JWT para enviarlo por WhatsApp/Email',
-  })
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_CAMPAIGN) // 🔥
+  @ApiOperation({ summary: 'Genera el enlace seguro JWT para WhatsApp/Email' })
   async generateUpdateLink(@Param('enrollmentId') enrollmentId: string) {
     const token =
       await this.dataUpdatesService.generateUpdateToken(enrollmentId);
-
-    // Aquí devuelves el enlace completo que la secretaria puede copiar y pegar
     const publicUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    return {
-      token,
-      url: `${publicUrl}/actualizar-datos/${token}`,
-    };
+    return { token, url: `${publicUrl}/actualizar-datos/${token}` };
   }
 
   @Post('broadcast/:enrollmentId')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
-  @ApiOperation({
-    summary:
-      'Envía una notificación Push a la App de los tutores del estudiante',
-  })
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_CAMPAIGN) // 🔥
+  @ApiOperation({ summary: 'Envía Push individual a tutores' })
   async triggerPushCampaign(@Param('enrollmentId') enrollmentId: string) {
     return this.dataUpdatesService.broadcastUpdateCampaign(enrollmentId);
   }
 
   @Post('broadcast/classroom/:classroomId')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_CAMPAIGN) // 🔥
   @ApiOperation({ summary: 'Envía Push a todos los padres de un curso' })
   async triggerClassroomCampaign(@Param('classroomId') classroomId: string) {
     return this.dataUpdatesService.broadcastToClassroom(classroomId);
   }
-  // 🔥 INYECTA ESTE NUEVO ENDPOINT AQUÍ ABAJO
-  @Patch(':enrollmentId/mark-physical')
-  @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
-  @ApiOperation({ summary: 'Registra que el padre entregó el RUDE en papel' })
-  markPhysicalDelivery(@Param('enrollmentId') enrollmentId: string) {
-    return this.dataUpdatesService.markPhysicalDelivery(enrollmentId);
-  }
 
   @Get('broadcast/classroom/:classroomId/preview')
   @ApiCookieAuth('uecg_access_token')
-  @UseGuards(AuthGuard('jwt'), RolesGuard)
-  @Roles(Role.ADMIN, Role.SECRETARIA)
-  @ApiOperation({ summary: 'Simula a cuántos padres llegará la alerta por curso' })
+  @UseGuards(AuthGuard('jwt'), PermissionsGuard)
+  @RequirePermissions(SystemPermissions.RUDE_READ) // 🔥
+  @ApiOperation({
+    summary: 'Simula a cuántos padres llegará la alerta por curso',
+  })
   async previewClassroomCampaign(@Param('classroomId') classroomId: string) {
-    // LLAMA AL SERVICIO NUEVO AQUÍ (O expónlo a través de la Fachada)
     return this.dataUpdatesService.previewClassroomBroadcast(classroomId);
   }
 }

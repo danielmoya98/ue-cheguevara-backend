@@ -133,7 +133,6 @@ export class StudentsService {
               language: guardianData.language,
               occupation: guardianData.occupation,
               educationLevel: guardianData.educationLevel,
-              // Convertimos a Date si enviaron la fecha
               birthDate: guardianData.birthDate
                 ? new Date(guardianData.birthDate)
                 : null,
@@ -192,7 +191,7 @@ export class StudentsService {
     file: Express.Multer.File,
     academicYearId: string,
     globalStatus: string,
-    classroomId: string, // <-- AHORA USAMOS ESTE ID PARA TODO EL LOTE
+    classroomId: string,
   ) {
     if (!file)
       throw new BadRequestException('No se proporcionó ningún archivo');
@@ -215,7 +214,6 @@ export class StudentsService {
       try {
         const rowData = row as any;
 
-        // Limpiamos los datos para evitar errores de espacios en blanco del Excel
         const ciEstudiante = rowData.CI_Estudiante
           ? String(rowData.CI_Estudiante).trim()
           : null;
@@ -228,8 +226,6 @@ export class StudentsService {
           ? String(rowData.Nombres_Tutor).trim()
           : null;
 
-        // 🔥 REGLA ACTUALIZADA: CI Estudiante, Nombres y Tutor son obligatorios.
-        // El RUDE es opcional para poder subir el Excel, pero afectará el estado final.
         if (!nombres || !ciEstudiante || !ciTutor || !nombresTutor) {
           throw new Error(
             'Faltan datos obligatorios para el Kardex (Nombres, CI_Estudiante, CI_Tutor o Nombres_Tutor)',
@@ -257,12 +253,13 @@ export class StudentsService {
                 birthDate: rowData.Fecha_Nacimiento
                   ? new Date(rowData.Fecha_Nacimiento)
                   : new Date(),
-                gender: String(rowData.Genero).toUpperCase().startsWith('M') ? 'MASCULINO' : 'FEMENINO',
+                gender: String(rowData.Genero).toUpperCase().startsWith('M')
+                  ? 'MASCULINO'
+                  : 'FEMENINO',
                 rudeCode: rudeCode,
               },
             });
           } else if (rudeCode) {
-            // Solo actualizamos el RUDE si el Excel trajo uno válido
             await tx.student.update({
               where: { id: student.id },
               data: { rudeCode: rudeCode },
@@ -340,10 +337,9 @@ export class StudentsService {
           if (exists)
             throw new Error(`El estudiante ya está inscrito en esta gestión.`);
 
-          // --- E. INSCRIPCIÓN (LÓGICA CONDICIONAL DEL ESTADO) ---
+          // --- E. INSCRIPCIÓN ---
           let finalStatus = globalStatus || rowData.Estado || 'REVISION_SIE';
 
-          // 🔥 LA REGLA DE ORO: Si no tiene RUDE, no puede ser INSCRITO directo.
           if (!rudeCode) {
             finalStatus = 'REVISION_SIE';
           }

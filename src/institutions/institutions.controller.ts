@@ -15,12 +15,8 @@ import { InstitutionsService } from './institutions.service';
 import { CreateInstitutionDto } from './dto/create-institution.dto';
 import { UpdateInstitutionDto } from './dto/update-institution.dto';
 import { UpdateCampaignSettingsDto } from './dto/update-campaign-settings.dto';
-import { UpdateAttendanceSettingsDto } from './dto/update-attendance-settings.dto'; // <-- Importa el DTO nuevo
+import { UpdateAttendanceSettingsDto } from './dto/update-attendance-settings.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import {
   CacheInterceptor,
@@ -29,9 +25,15 @@ import {
 } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
+
 @ApiTags('Institución (RUE)')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 @Controller('institutions')
 export class InstitutionsController {
   constructor(
@@ -45,13 +47,14 @@ export class InstitutionsController {
 
   // --- PANEL DE CAMPAÑA RUDE ---
   @Get('campaign-settings')
+  // 🔓 Lectura abierta para que el Frontend sepa si la campaña está activa
   @ApiOperation({ summary: 'Obtiene el estado actual de la campaña RUDE' })
   getCampaignSettings() {
     return this.institutionsService.getCampaignSettings();
   }
 
   @Patch('campaign-settings')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
   @ApiOperation({ summary: 'Actualiza la configuración de la campaña RUDE' })
   async updateCampaignSettings(@Body() body: UpdateCampaignSettingsDto) {
     const result = await this.institutionsService.updateCampaignSettings(body);
@@ -61,16 +64,18 @@ export class InstitutionsController {
 
   // --- REGLAS DE ASISTENCIA ---
   @Get('attendance-settings')
+  // 🔓 Lectura abierta (Profesores necesitan saber las tolerancias)
   @ApiOperation({ summary: 'Obtiene las reglas de asistencia' })
   getAttendanceSettings() {
     return this.institutionsService.getAttendanceSettings();
   }
 
   @Patch('attendance-settings')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
   @ApiOperation({ summary: 'Actualiza las reglas de asistencia' })
   async updateAttendanceSettings(@Body() body: UpdateAttendanceSettingsDto) {
-    const result = await this.institutionsService.updateAttendanceSettings(body);
+    const result =
+      await this.institutionsService.updateAttendanceSettings(body);
     await this.cacheManager.clear();
     return result;
   }
@@ -80,9 +85,12 @@ export class InstitutionsController {
   // ==========================================
 
   @Post()
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
   @ApiOperation({ summary: 'Registra una nueva unidad educativa' })
-  async create(@Body() createInstitutionDto: CreateInstitutionDto, @Req() req: any) {
+  async create(
+    @Body() createInstitutionDto: CreateInstitutionDto,
+    @Req() req: any,
+  ) {
     createInstitutionDto.directorId = req.user.userId;
     const result = await this.institutionsService.create(createInstitutionDto);
     await this.cacheManager.clear();
@@ -91,8 +99,10 @@ export class InstitutionsController {
 
   @Get()
   @UseInterceptors(CacheInterceptor)
-  @CacheTTL(300000)
-  @ApiOperation({ summary: 'Obtiene instituciones con paginación, filtros y ordenamiento' })
+  @CacheTTL(300000) // 5 minutos de caché
+  @ApiOperation({
+    summary: 'Obtiene instituciones con paginación, filtros y ordenamiento',
+  })
   findAll(@Query() query: PaginationDto) {
     return this.institutionsService.findAll(query);
   }
@@ -106,11 +116,21 @@ export class InstitutionsController {
   }
 
   @Patch(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
   @ApiOperation({ summary: 'Actualiza los datos del RUE' })
-  async update(@Param('id') id: string, @Body() updateInstitutionDto: UpdateInstitutionDto, @Req() req: any) {
-    updateInstitutionDto.directorId = req.user.userId;
-    const result = await this.institutionsService.update(id, updateInstitutionDto);
+  async update(
+    @Param('id') id: string,
+    @Body() updateInstitutionDto: UpdateInstitutionDto,
+    @Req() req: any,
+  ) {
+    // Si cambia el director, registramos quién hizo el cambio/es el nuevo director
+    if (req.user.userId) {
+      updateInstitutionDto.directorId = req.user.userId;
+    }
+    const result = await this.institutionsService.update(
+      id,
+      updateInstitutionDto,
+    );
     await this.cacheManager.clear();
     return result;
   }

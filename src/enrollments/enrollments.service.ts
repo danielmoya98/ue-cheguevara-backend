@@ -2,32 +2,37 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { Prisma } from '../../prisma/generated/client';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @Injectable()
 export class EnrollmentsService {
   constructor(private prisma: PrismaService) {}
 
-  // 🔥 TRANSACCIÓN MAESTRA DE INSCRIPCIÓN (Ventanilla y Formulario Público)
+  // ==========================================
+  // HELPER: ABAC - FILTRO DE CURSOS PARA DOCENTES
+  // ==========================================
+  private async getTeacherClassroomIds(userId: string): Promise<string[]> {
+    const assignments = await this.prisma.teacherAssignment.findMany({
+      where: { teacherId: userId },
+      select: { classroomId: true },
+    });
+    return assignments.map((a) => a.classroomId);
+  }
+
   async create(createEnrollmentDto: any) {
-    // Nota: Usamos 'any' asumiendo que tu CreateEnrollmentDto mapea los campos de Zod.
-    // Si tienes el DTO tipado con los 40 campos, el comportamiento es el mismo.
     const payload = createEnrollmentDto;
 
     return await this.prisma.$transaction(async (tx) => {
-      // =========================================================
-      // 1. VALIDACIÓN DE CUPOS (LA REGLA DEL RECHAZO)
-      // =========================================================
+      // 1. VALIDACIÓN DE CUPOS
       const occupiedSeats = await tx.enrollment.count({
         where: {
           classroomId: payload.classroomId,
-          // 🔥 EL SECRETO DE LOS CUPOS:
-          // Solo contamos a los que están esperando revisión o ya inscritos.
-          // Los que están RECHAZADOS o RETIRADOS liberan el cupo automáticamente.
           status: { in: ['INSCRITO', 'REVISION_SIE'] },
         },
       });
@@ -36,29 +41,21 @@ export class EnrollmentsService {
         where: { id: payload.classroomId },
       });
 
-      if (!classroom) {
-        throw new NotFoundException('El curso seleccionado no existe.');
-      }
-
+      if (!classroom) throw new NotFoundException('El curso no existe.');
       if (occupiedSeats >= classroom.capacity) {
         throw new BadRequestException(
-          'El curso seleccionado ya no tiene cupos disponibles.',
+          'El curso ya no tiene cupos disponibles.',
         );
       }
 
-      // =========================================================
-      // 2. SINCRONIZACIÓN DEL ESTUDIANTE (Student)
-      // =========================================================
+      // 2. SINCRONIZACIÓN DEL ESTUDIANTE
       let student;
       if (payload.ci) {
-        // Si tiene CI, buscamos si ya existe para actualizarlo o crearlo (Upsert)
         student = await tx.student.upsert({
           where: { ci: payload.ci },
           update: {
-            // Actualizamos datos volátiles de salud/socioeconómicos
             hasDisability: payload.hasDisability,
             hasAutism: payload.hasAutism,
-            // ...
           },
           create: {
             ci: payload.ci,
@@ -73,7 +70,6 @@ export class EnrollmentsService {
           },
         });
       } else {
-        // Si no tiene CI (ej. niños de inicial), lo creamos directo
         student = await tx.student.create({
           data: {
             documentType: payload.documentType,
@@ -88,9 +84,7 @@ export class EnrollmentsService {
         });
       }
 
-      // =========================================================
-      // 3. SINCRONIZACIÓN DE TUTORES Y PARENTESCO (StudentGuardian)
-      // =========================================================
+      // 3. SINCRONIZACIÓN DE TUTORES
       if (payload.guardians && payload.guardians.length > 0) {
         for (const tutor of payload.guardians) {
           const guardian = await tx.guardian.upsert({
@@ -111,7 +105,6 @@ export class EnrollmentsService {
             },
           });
 
-          // Creamos/Actualizamos el vínculo familiar en la tabla pivote
           await tx.studentGuardian.upsert({
             where: {
               studentId_guardianId: {
@@ -129,17 +122,12 @@ export class EnrollmentsService {
         }
       }
 
-      // =========================================================
-      // 4. CREACIÓN DEL EVENTO ANUAL (Enrollment)
-      // =========================================================
-      // Obtenemos la gestión activa para inyectarla silenciosamente
+      // 4. CREACIÓN DEL EVENTO ANUAL
       const activeYear = await tx.academicYear.findFirst({
         where: { status: 'ACTIVE' },
       });
-
-      if (!activeYear) {
-        throw new BadRequestException('No hay una Gestión Académica activa.');
-      }
+      if (!activeYear)
+        throw new BadRequestException('No hay Gestión Académica activa.');
 
       const enrollment = await tx.enrollment.create({
         data: {
@@ -147,29 +135,23 @@ export class EnrollmentsService {
           classroomId: payload.classroomId,
           academicYearId: activeYear.id,
           enrollmentType: payload.enrollmentType,
-          status: 'REVISION_SIE', // Todo inscrito entra a revisión por defecto
+          status: 'REVISION_SIE',
         },
       });
 
-      // =========================================================
-      // 5. VOLCADO DEL FORMULARIO SOCIOECONÓMICO (RudeRecord)
-      // =========================================================
+      // 5. VOLCADO DEL FORMULARIO SOCIOECONÓMICO
       await tx.rudeRecord.create({
         data: {
           enrollmentId: enrollment.id,
-          // Dirección
           department: payload.department,
           province: payload.province,
           municipality: payload.municipality,
           street: payload.street,
           cellphone: payload.cellphone,
-          // Idiomas
           nativeLanguage: payload.nativeLanguage,
-          // Transporte
           transportType: payload.transportType,
           transportTime: payload.transportTime,
           livesWith: payload.livesWith,
-          // ... (Aquí puedes volcar el resto de los campos de tu DTO)
         },
       });
 
@@ -177,25 +159,44 @@ export class EnrollmentsService {
     });
   }
 
-  // 🔥 BUSCADOR Y PAGINADOR INTELIGENTE (Actualizado con Semáforo Omnicanal)
-  async findAll(query: QueryEnrollmentDto) {
+  // 🔥 BUSCADOR (Actualizado con ABAC)
+  async findAll(query: QueryEnrollmentDto, user: any) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const { search, academicYearId, classroomId, status, enrollmentType, level } = query;
+    const {
+      search,
+      academicYearId,
+      classroomId,
+      status,
+      enrollmentType,
+      level,
+    } = query;
+
+    // ABAC: Si es Docente, limitamos la búsqueda a sus cursos
+    let allowedClassroomIds: string[] | null = null;
+    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+      allowedClassroomIds = await this.getTeacherClassroomIds(user.userId);
+    }
 
     let statusFilter: any = undefined;
-    if (status) {
-      const statusArray = status.split(',');
-      statusFilter = { in: statusArray };
-    }
+    if (status) statusFilter = { in: status.split(',') };
 
     let classroomFilter: any = undefined;
     if (classroomId) {
+      // Si pidió un curso específico y no es suyo (siendo profe), no devolverá nada
+      if (allowedClassroomIds && !allowedClassroomIds.includes(classroomId)) {
+        return { data: [], meta: { page, limit, total: 0, totalPages: 0 } };
+      }
       classroomFilter = { id: classroomId };
     } else if (level) {
-      classroomFilter = { level: level };
+      classroomFilter = {
+        level: level,
+        ...(allowedClassroomIds && { id: { in: allowedClassroomIds } }),
+      };
+    } else if (allowedClassroomIds) {
+      classroomFilter = { id: { in: allowedClassroomIds } }; // Profe viendo lista general
     }
 
     const whereCondition: Prisma.EnrollmentWhereInput = {
@@ -226,11 +227,14 @@ export class EnrollmentsService {
         include: {
           student: {
             select: {
-              id: true, ci: true, rudeCode: true, names: true, lastNamePaterno: true, lastNameMaterno: true, gender: true,
-              // 🔥 Inyectamos la extracción de tutores para el cálculo Omnicanal
-              guardians: {
-                include: { guardian: { include: { user: true } } }
-              }
+              id: true,
+              ci: true,
+              rudeCode: true,
+              names: true,
+              lastNamePaterno: true,
+              lastNameMaterno: true,
+              gender: true,
+              guardians: { include: { guardian: { include: { user: true } } } },
             },
           },
           classroom: {
@@ -240,41 +244,32 @@ export class EnrollmentsService {
       }),
     ]);
 
-    // 🔥 EL ALGORITMO PREDICTIVO INDIVIDUAL
     const data = rawData.map((enrollment) => {
-      let hasApp = false;
-      let hasEmail = false;
-      let targetEmail: string | null = null; // 🔥 CORREGIDO: Tipado explícito
-      let hasPhone = false;
-      let targetPhone: string | null = null; // 🔥 CORREGIDO: Tipado explícito
+      let hasApp = false,
+        hasEmail = false,
+        hasPhone = false;
+      let targetEmail: string | null = null,
+        targetPhone: string | null = null;
 
       if (enrollment.student.guardians) {
         enrollment.student.guardians.forEach((g) => {
-          // Chequeo de App (FCM Token)
-          if (g.guardian.user && g.guardian.user.fcmTokens && g.guardian.user.fcmTokens.length > 0) {
-            hasApp = true;
-          }
-          // Chequeo de Email
+          if (g.guardian.user?.fcmTokens?.length) hasApp = true;
           if (g.guardian.user?.email || g.guardian.user?.recoveryEmail) {
             hasEmail = true;
-            targetEmail = g.guardian.user?.email || g.guardian.user?.recoveryEmail || null;
+            targetEmail =
+              g.guardian.user?.email || g.guardian.user?.recoveryEmail || null;
           }
-          // Chequeo de Celular (WhatsApp)
           if (g.guardian.phone) {
             hasPhone = true;
             targetPhone = g.guardian.phone;
           }
         });
       }
-
-      // Limpiamos el objeto guardians gigante para no saturar el payload HTTP
       const { guardians, ...studentClean } = enrollment.student;
-
       return {
         ...enrollment,
         student: studentClean,
-        // Mandamos el semáforo listo para que React lo pinte
-        contactStatus: { hasApp, hasEmail, targetEmail, hasPhone, targetPhone }
+        contactStatus: { hasApp, hasEmail, targetEmail, hasPhone, targetPhone },
       };
     });
 
@@ -283,9 +278,9 @@ export class EnrollmentsService {
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
-  // (Intacto)
-  // 🔥 MÉTODO ACTUALIZADO: Obtiene detalles + Detección de Hermanos
-  async findOne(id: string) {
+
+  // 🔥 DETALLE COMPLETO (Con ABAC)
+  async findOne(id: string, user: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
       include: {
@@ -298,12 +293,10 @@ export class EnrollmentsService {
               include: {
                 guardian: {
                   include: {
-                    // 🔥 Buscamos a todos los estudiantes de este tutor
                     students: {
                       include: {
                         student: {
                           include: {
-                            // Traemos su inscripción actual para saber en qué curso está el hermano
                             enrollments: {
                               where: {
                                 academicYear: { status: 'ACTIVE' },
@@ -324,36 +317,35 @@ export class EnrollmentsService {
       },
     });
 
-    if (!enrollment) {
-      throw new NotFoundException(
-        `La inscripción con ID ${id} no fue encontrada en el sistema.`,
+    if (!enrollment) throw new NotFoundException(`Inscripción no encontrada.`);
+
+    // ABAC: Si es profe, verificamos que el alumno esté en su curso
+    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+      const allowedClassroomIds = await this.getTeacherClassroomIds(
+        user.userId,
       );
+      if (!allowedClassroomIds.includes(enrollment.classroomId)) {
+        throw new ForbiddenException(
+          'Privacidad: Este estudiante no pertenece a sus cursos.',
+        );
+      }
     }
 
-    // =========================================================
-    // 🧬 ALGORITMO DE EXTRACCIÓN DE HERMANOS
-    // =========================================================
     const siblingsMap = new Map();
-
     if (enrollment.student.guardians) {
       enrollment.student.guardians.forEach((sg) => {
         sg.guardian.students.forEach((siblingLink) => {
           const sibling = siblingLink.student;
-
-          // Excluimos al propio estudiante que estamos consultando
           if (sibling.id !== enrollment.studentId) {
-            const activeEnrollment = sibling.enrollments[0]; // Su inscripción de este año (si la tiene)
-
-            // Usamos un Map para evitar duplicados (por si comparten padre y madre)
+            const activeEnrollment = sibling.enrollments[0];
             siblingsMap.set(sibling.id, {
               id: sibling.id,
               names:
                 `${sibling.names} ${sibling.lastNamePaterno} ${sibling.lastNameMaterno || ''}`.trim(),
               ci: sibling.ci || 'Sin CI',
-              // Mostramos el curso del hermano, o avisamos si no está inscrito este año
               classroom: activeEnrollment
                 ? `${activeEnrollment.classroom.grade} "${activeEnrollment.classroom.section}" - ${activeEnrollment.classroom.level}`
-                : 'No inscrito en la gestión actual',
+                : 'No inscrito este año',
               sharedTutor: `${sg.guardian.names} ${sg.guardian.lastNamePaterno}`,
             });
           }
@@ -361,90 +353,25 @@ export class EnrollmentsService {
       });
     }
 
-    const siblings = Array.from(siblingsMap.values());
-
-    // Retornamos la data completa + el arreglo de hermanos limpios
-    return { data: { ...enrollment, siblings } };
-  }
-  // (Intacto y Seguro, pero con la nueva regla del RUDE)
-  async update(id: string, updateEnrollmentDto: UpdateEnrollmentDto) {
-    // 1. Extraemos receivedDocuments del DTO
-    const { status, rudeCode, receivedDocuments, ...restData } =
-      updateEnrollmentDto;
-
-    const enrollment = await this.prisma.enrollment.findUnique({
-      where: { id },
-      include: { student: true },
-    });
-
-    if (!enrollment) {
-      throw new NotFoundException(`La inscripción con ID ${id} no existe.`);
-    }
-
-    // =========================================================
-    // 🔥 LA REGLA MAESTRA DEL CÓDIGO RUDE
-    // =========================================================
-    if (status === 'INSCRITO') {
-      // Tomamos el código que mandó la secretaria, o el que ya tenía el alumno
-      const finalRudeCode = rudeCode || enrollment.student.rudeCode;
-
-      // Si NO es alumno Antiguo y NO tiene código RUDE, bloqueamos la inscripción
-      if (enrollment.enrollmentType !== 'ANTIGUO' && !finalRudeCode) {
-        throw new BadRequestException(
-          `Operación denegada: Debe registrar el Código RUDE oficial del estudiante para finalizar su inscripción como ${enrollment.enrollmentType}.`,
-        );
-      }
-    }
-
-    return await this.prisma.$transaction(async (tx) => {
-      // 2. Actualizamos la inscripción
-      const updatedEnrollment = await tx.enrollment.update({
-        where: { id },
-        data: {
-          ...(status && { status }),
-          ...(receivedDocuments && { receivedDocuments }), // 🔥 Guardamos el JSON de documentos en la BD
-          ...restData,
-        },
-        include: {
-          student: true,
-          classroom: true,
-        },
-      });
-
-      // 3. Si mandaron un RUDE nuevo, actualizamos el perfil inmutable del estudiante
-      if (rudeCode) {
-        await tx.student.update({
-          where: { id: enrollment.studentId },
-          data: { rudeCode },
-        });
-        // Mutamos el objeto de respuesta para que el frontend tenga el dato fresco
-        updatedEnrollment.student.rudeCode = rudeCode;
-      }
-
-      return updatedEnrollment;
-    });
-  }
-  remove(id: string) {
-    return `This action removes a #${id} enrollment`;
+    return {
+      data: { ...enrollment, siblings: Array.from(siblingsMap.values()) },
+    };
   }
 
-  // 🔥 NUEVO MÉTODO: Resumen Ligero para el Modal de Kardex
-  async findKardex(id: string) {
+  // 🔥 KARDEX LIGERO (Con ABAC)
+  async findKardex(id: string, user: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
       select: {
         id: true,
         status: true,
-        enrollmentType: true, // 🔥 AGREGADO: Para ver si es NUEVO, ANTIGUO o TRASPASO
-        academicYear: {
-          select: { year: true },
-        },
+        enrollmentType: true,
+        classroomId: true,
+        academicYear: { select: { year: true } },
         classroom: {
           select: { grade: true, section: true, level: true, shift: true },
         },
-        rudeRecord: {
-          select: { street: true, houseNumber: true, zone: true },
-        },
+        rudeRecord: { select: { street: true, houseNumber: true, zone: true } },
         student: {
           select: {
             id: true,
@@ -473,12 +400,66 @@ export class EnrollmentsService {
       },
     });
 
-    if (!enrollment) {
-      throw new NotFoundException(
-        `El Kardex de la inscripción ${id} no fue encontrado.`,
+    if (!enrollment) throw new NotFoundException(`Kardex no encontrado.`);
+
+    // ABAC
+    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+      const allowedClassroomIds = await this.getTeacherClassroomIds(
+        user.userId,
       );
+      if (!allowedClassroomIds.includes(enrollment.classroomId)) {
+        throw new ForbiddenException(
+          'Privacidad: Este estudiante no pertenece a sus cursos.',
+        );
+      }
     }
 
     return { data: enrollment };
+  }
+
+  async update(id: string, updateEnrollmentDto: UpdateEnrollmentDto) {
+    const { status, rudeCode, receivedDocuments, ...restData } =
+      updateEnrollmentDto;
+
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id },
+      include: { student: true },
+    });
+
+    if (!enrollment) throw new NotFoundException(`Inscripción no encontrada.`);
+
+    if (status === 'INSCRITO') {
+      const finalRudeCode = rudeCode || enrollment.student.rudeCode;
+      if (enrollment.enrollmentType !== 'ANTIGUO' && !finalRudeCode) {
+        throw new BadRequestException(
+          `Operación denegada: Debe registrar el Código RUDE para finalizar inscripción.`,
+        );
+      }
+    }
+
+    return await this.prisma.$transaction(async (tx) => {
+      const updatedEnrollment = await tx.enrollment.update({
+        where: { id },
+        data: {
+          ...(status && { status }),
+          ...(receivedDocuments && { receivedDocuments }),
+          ...restData,
+        },
+        include: { student: true, classroom: true },
+      });
+
+      if (rudeCode) {
+        await tx.student.update({
+          where: { id: enrollment.studentId },
+          data: { rudeCode },
+        });
+        updatedEnrollment.student.rudeCode = rudeCode;
+      }
+      return updatedEnrollment;
+    });
+  }
+
+  remove(id: string) {
+    return `This action removes a #${id} enrollment`; // Dejar como TODO según necesidades del colegio
   }
 }

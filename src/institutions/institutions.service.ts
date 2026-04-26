@@ -17,10 +17,14 @@ export class InstitutionsService {
     const existing = await this.prisma.institution.findUnique({
       where: { rueCode: data.rueCode },
     });
-    if (existing) throw new ConflictException('El Código RUE ya está registrado');
+    if (existing)
+      throw new ConflictException('El Código RUE ya está registrado');
 
     const institution = await this.prisma.institution.create({ data });
-    return { data: institution, message: 'Institución registrada exitosamente' };
+    return {
+      data: institution,
+      message: 'Institución registrada exitosamente',
+    };
   }
 
   async findAll(query: PaginationDto) {
@@ -72,7 +76,9 @@ export class InstitutionsService {
   }
 
   async update(id: string, updateData: UpdateInstitutionDto) {
-    const institution = await this.prisma.institution.findUnique({ where: { id } });
+    const institution = await this.prisma.institution.findUnique({
+      where: { id },
+    });
     if (!institution) throw new NotFoundException('Institución no encontrada');
 
     const updated = await this.prisma.institution.update({
@@ -96,10 +102,11 @@ export class InstitutionsService {
     });
 
     if (!institution) {
-      throw new NotFoundException('No se encontró la configuración de la Institución.');
+      throw new NotFoundException(
+        'No se encontró la configuración de la Institución.',
+      );
     }
 
-    // Retornamos directo para que Next.js lo mapee limpiamente
     return institution;
   }
 
@@ -111,13 +118,16 @@ export class InstitutionsService {
     const institution = await this.prisma.institution.findFirst();
 
     if (!institution) {
-      throw new NotFoundException('No se encontró la configuración de la Institución.');
+      throw new NotFoundException(
+        'No se encontró la configuración de la Institución.',
+      );
     }
 
     let channels;
     if (data.activeNotificationChannels) {
       channels = data.activeNotificationChannels.map(
-        (channel) => NotificationChannel[channel as keyof typeof NotificationChannel],
+        (channel) =>
+          NotificationChannel[channel as keyof typeof NotificationChannel],
       );
     }
 
@@ -156,7 +166,8 @@ export class InstitutionsService {
       },
     });
 
-    if (!institution) throw new NotFoundException('No se encontró la configuración.');
+    if (!institution)
+      throw new NotFoundException('No se encontró la configuración.');
     return institution;
   }
 
@@ -168,7 +179,8 @@ export class InstitutionsService {
     notificationFrequency?: string;
   }) {
     const institution = await this.prisma.institution.findFirst();
-    if (!institution) throw new NotFoundException('No se encontró la configuración.');
+    if (!institution)
+      throw new NotFoundException('No se encontró la configuración.');
 
     const updated = await this.prisma.institution.update({
       where: { id: institution.id },
@@ -190,5 +202,4 @@ export class InstitutionsService {
 
     return { data: updated, message: 'Configuración de Asistencia guardada.' };
   }
-  
 }

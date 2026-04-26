@@ -95,7 +95,18 @@ export class SubjectsService {
 
   async remove(id: string) {
     await this.findOne(id);
-    // TODO: En el futuro, validar que la materia no esté asignada a ningún docente antes de borrar
+
+    // 🔥 REGLA DE INTEGRIDAD: Validar que la materia no esté asignada
+    const assignmentsCount = await this.prisma.teacherAssignment.count({
+      where: { subjectId: id },
+    });
+
+    if (assignmentsCount > 0) {
+      throw new ConflictException(
+        'No se puede eliminar la materia porque ya se encuentra asignada a uno o más docentes en la carga horaria.',
+      );
+    }
+
     await this.prisma.subject.delete({ where: { id } });
     return { message: 'Materia eliminada correctamente' };
   }

@@ -17,23 +17,24 @@ import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { UpdateAcademicYearDto } from './dto/update-academic-year.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
-// ❌ Eliminamos CacheInterceptor y CacheTTL de aquí
+
+// 🔥 IMPORTACIONES DE LA NUEVA SEGURIDAD RBAC
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Gestión Académica')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+// 🔥 Usamos el nuevo PermissionsGuard en lugar de RolesGuard
+@UseGuards(AuthGuard('jwt'), PermissionsGuard)
 @Controller('academic-years')
 export class AcademicYearsController {
   constructor(private readonly academicYearsService: AcademicYearsService) {}
 
   // =======================================================
-  // ENDPOINTS DE LECTURA (SIN CACHÉ REDIS - TIEMPO REAL)
-  // React Query en el frontend ya se encarga de no saturar esta ruta
+  // ENDPOINTS DE LECTURA (Acceso para cualquier usuario logueado)
   // =======================================================
 
   @Get('current')
@@ -55,21 +56,21 @@ export class AcademicYearsController {
   }
 
   // =======================================================
-  // ENDPOINTS ADMINISTRATIVOS (CON IDEMPOTENCIA)
+  // ENDPOINTS ADMINISTRATIVOS (Requieren Permisos RBAC)
   // =======================================================
 
   @Post()
-  @Roles(Role.ADMIN)
-  @UseInterceptors(IdempotencyInterceptor) // ✅ Este escudo SÍ se queda
-  @ApiOperation({ summary: 'Crea una nueva gestión escolar (Solo ADMIN)' })
+  @RequirePermissions(SystemPermissions.ACADEMIC_YEARS_CREATE) // 🔥 Control RBAC
+  @UseInterceptors(IdempotencyInterceptor)
+  @ApiOperation({ summary: 'Crea una nueva gestión escolar' })
   create(@Body() createAcademicYearDto: CreateAcademicYearDto) {
     return this.academicYearsService.create(createAcademicYearDto);
   }
 
   @Patch(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.ACADEMIC_YEARS_UPDATE) // 🔥 Control RBAC
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Actualiza los datos de una gestión (Solo ADMIN)' })
+  @ApiOperation({ summary: 'Actualiza los datos de una gestión' })
   update(
     @Param('id') id: string,
     @Body() updateAcademicYearDto: UpdateAcademicYearDto,
@@ -78,7 +79,7 @@ export class AcademicYearsController {
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.ACADEMIC_YEARS_DELETE) // 🔥 Control RBAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina una gestión si no tiene cursos asignados' })
   remove(@Param('id') id: string) {

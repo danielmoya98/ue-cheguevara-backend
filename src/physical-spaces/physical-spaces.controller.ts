@@ -7,25 +7,41 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { PhysicalSpacesService } from './physical-spaces.service';
 import { CreatePhysicalSpaceDto } from './dto/create-physical-space.dto';
 import { UpdatePhysicalSpaceDto } from './dto/update-physical-space.dto';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiQuery,
+  ApiCookieAuth,
+} from '@nestjs/swagger';
 import { SpaceType } from '../../prisma/generated/client';
 
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
+
 @ApiTags('Gestión de Espacios Físicos')
+@ApiCookieAuth('uecg_access_token') // 🔥 Requerido para Swagger
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Candados Maestros Activados
 @Controller('physical-spaces')
 export class PhysicalSpacesController {
   constructor(private readonly physicalSpacesService: PhysicalSpacesService) {}
 
   @Post()
+  @RequirePermissions(SystemPermissions.PHYSICAL_SPACES_WRITE) // 🔥 Solo Admin
   @ApiOperation({ summary: 'Registra una nueva aula, laboratorio o cancha' })
   create(@Body() createPhysicalSpaceDto: CreatePhysicalSpaceDto) {
     return this.physicalSpacesService.create(createPhysicalSpaceDto);
   }
 
   @Get()
+  // 🔓 Sin @RequirePermissions: Lectura abierta para cualquier usuario logueado
   @ApiOperation({ summary: 'Obtiene todos los espacios físicos' })
   @ApiQuery({ name: 'type', required: false, enum: SpaceType })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
@@ -33,7 +49,6 @@ export class PhysicalSpacesController {
     @Query('type') type?: SpaceType,
     @Query('isActive') isActiveStr?: string,
   ) {
-    // Convertimos el string 'true'/'false' de la URL a un boolean real
     let isActive: boolean | undefined = undefined;
     if (isActiveStr === 'true') isActive = true;
     if (isActiveStr === 'false') isActive = false;
@@ -42,12 +57,14 @@ export class PhysicalSpacesController {
   }
 
   @Get(':id')
+  // 🔓 Sin @RequirePermissions: Lectura abierta
   @ApiOperation({ summary: 'Obtiene el detalle de un espacio físico' })
   findOne(@Param('id') id: string) {
     return this.physicalSpacesService.findOne(id);
   }
 
   @Patch(':id')
+  @RequirePermissions(SystemPermissions.PHYSICAL_SPACES_WRITE) // 🔥 Solo Admin
   @ApiOperation({ summary: 'Actualiza nombre, capacidad o estado' })
   update(
     @Param('id') id: string,
@@ -57,6 +74,7 @@ export class PhysicalSpacesController {
   }
 
   @Delete(':id')
+  @RequirePermissions(SystemPermissions.PHYSICAL_SPACES_WRITE) // 🔥 Solo Admin
   @ApiOperation({ summary: 'Elimina un espacio físico (Si no está en uso)' })
   remove(@Param('id') id: string) {
     return this.physicalSpacesService.remove(id);

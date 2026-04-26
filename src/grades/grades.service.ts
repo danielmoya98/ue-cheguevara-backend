@@ -2,21 +2,36 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
-  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertGradeDto } from './dto/upsert-grade.dto';
+// 🔥 Necesitamos importar los permisos para que el ABAC reconozca al ADMIN
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @Injectable()
 export class GradesService {
   constructor(private prisma: PrismaService) {}
 
+  // ==========================================
+  // HELPER: ABAC - VERIFICAR PROPIEDAD DE MATERIA
+  // ==========================================
+  private verifyAssignmentOwnership(assignment: any, user: any) {
+    // Si tiene el permiso supremo (Admin/Director), pasa directo
+    if (user.permissions.includes(SystemPermissions.MANAGE_ALL)) return;
+
+    // Si es docente, la materia DEBE pertenecerle
+    if (assignment.teacherId !== user.userId) {
+      throw new ForbiddenException(
+        'Privacidad: No tienes permiso para ver o alterar las calificaciones de una materia que no dictas.',
+      );
+    }
+  }
+
   /**
    * Registra o actualiza la calificación de un estudiante.
-   * El cálculo matemático se realiza exclusivamente en el backend.
    */
-  async upsertGrade(data: UpsertGradeDto, userId: string) {
-    // 1. Validar que el Trimestre esté ABIERTO (BLINDAJE)
+  async upsertGrade(data: UpsertGradeDto, user: any) {
+    // 1. Validar que el Trimestre esté ABIERTO
     const trimester = await this.prisma.trimester.findUnique({
       where: { id: data.trimesterId },
     });
@@ -40,7 +55,10 @@ export class GradesService {
     if (!assignment)
       throw new NotFoundException('Asignación docente no encontrada');
 
-    // 3. Obtener nota actual (si existe) para no sobreescribir valores en blanco con ceros
+    // 🔥 3. POLÍTICA ABAC: ¿Es dueño de la materia?
+    this.verifyAssignmentOwnership(assignment, user);
+
+    // 4. Obtener nota actual
     const existingGrade = await this.prisma.grade.findUnique({
       where: {
         enrollmentId_teacherAssignmentId_trimesterId: {
@@ -51,7 +69,7 @@ export class GradesService {
       },
     });
 
-    // 4. MOTOR MATEMÁTICO: Calcular el Total (Mantenemos nulos si no hay nota aún)
+    // 5. MOTOR MATEMÁTICO: Calcular el Total
     const currentSer = data.scoreSer ?? existingGrade?.scoreSer ?? null;
     const currentSaber = data.scoreSaber ?? existingGrade?.scoreSaber ?? null;
     const currentHacer = data.scoreHacer ?? existingGrade?.scoreHacer ?? null;
@@ -60,7 +78,6 @@ export class GradesService {
     let totalScore: number | null = null;
     let finalScore: number | null = null;
 
-    // Solo sumamos si al menos hay una nota ingresada
     if (
       currentSer !== null ||
       currentSaber !== null ||
@@ -73,11 +90,10 @@ export class GradesService {
         (currentHacer || 0) +
         (currentAuto || 0);
 
-      // La nota final oficial será el totalScore (El reforzamiento se aplicará en otra función más adelante)
       finalScore = totalScore;
     }
 
-    // 5. Ejecutar UPSERT (Crear o Actualizar)
+    // 6. Ejecutar UPSERT
     return await this.prisma.grade.upsert({
       where: {
         enrollmentId_teacherAssignmentId_trimesterId: {
@@ -94,7 +110,7 @@ export class GradesService {
         totalScore,
         finalScore,
         status: data.status || existingGrade?.status,
-        lastModifiedById: userId, // Auditoría: Quién hizo el último cambio
+        lastModifiedById: user.userId, // 🔥 Corrección: Extraído limpiamente del JWT
       },
       create: {
         enrollmentId: data.enrollmentId,
@@ -107,18 +123,18 @@ export class GradesService {
         totalScore,
         finalScore,
         status: data.status || 'DRAFT',
-        lastModifiedById: userId,
+        lastModifiedById: user.userId, // 🔥 Corrección: Extraído limpiamente del JWT
       },
     });
   }
 
   /**
    * Obtiene la planilla completa de un curso para una materia y trimestre específico.
-   * Ideal para el DataGrid del Frontend.
    */
   async getGradesByAssignment(
     teacherAssignmentId: string,
     trimesterId: string,
+    user: any,
   ) {
     const assignment = await this.prisma.teacherAssignment.findUnique({
       where: { id: teacherAssignmentId },
@@ -127,11 +143,13 @@ export class GradesService {
 
     if (!assignment) throw new NotFoundException('Asignación no encontrada');
 
-    // Buscamos a todos los estudiantes INSCRITOS en ese curso
+    // 🔥 POLÍTICA ABAC: ¿Puede ver estas notas?
+    this.verifyAssignmentOwnership(assignment, user);
+
     const enrollments = await this.prisma.enrollment.findMany({
       where: {
         classroomId: assignment.classroomId,
-        status: { in: ['INSCRITO', 'OBSERVADO'] }, // Excluimos retirados
+        status: { in: ['INSCRITO', 'OBSERVADO'] },
       },
       include: {
         student: {
@@ -143,7 +161,6 @@ export class GradesService {
             ci: true,
           },
         },
-        // Traemos su nota para esta materia y trimestre
         grades: {
           where: { teacherAssignmentId, trimesterId },
         },
@@ -154,11 +171,10 @@ export class GradesService {
       ],
     });
 
-    // Formateamos la respuesta para que el DataGrid del frontend la consuma fácil
     return enrollments.map((e) => ({
       enrollmentId: e.id,
       student: e.student,
-      grade: e.grades.length > 0 ? e.grades[0] : null, // Si es null, sus casillas estarán vacías
+      grade: e.grades.length > 0 ? e.grades[0] : null,
     }));
   }
 }

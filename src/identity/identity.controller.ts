@@ -1,27 +1,38 @@
-import { Controller, Get, Post, Param, Body, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Body,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { IdentityService } from './identity.service';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Identidad y Carnetización')
 @ApiCookieAuth('uecg_access_token')
 @Controller('identity')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 export class IdentityController {
   constructor(private readonly identityService: IdentityService) {}
 
   @Get('qr/:studentId')
+  @RequirePermissions(SystemPermissions.IDENTITY_READ) // 🔥 RBAC
   @ApiOperation({ summary: 'Obtiene el estado y el QR del alumno' })
   async getStudentQR(@Param('studentId') studentId: string) {
-    // 🔥 CORRECCIÓN CLAVE: Devolvemos directamente lo que manda el servicio (isActive + qr)
     return this.identityService.getStudentQR(studentId);
   }
 
   @Post('generate/:studentId')
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @RequirePermissions(SystemPermissions.IDENTITY_WRITE) // 🔥 RBAC
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Genera y activa un nuevo QR para el estudiante' })
   async generateNewQR(@Param('studentId') studentId: string) {
@@ -29,7 +40,7 @@ export class IdentityController {
   }
 
   @Post('revoke/:studentId')
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @RequirePermissions(SystemPermissions.IDENTITY_WRITE) // 🔥 RBAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoca el QR actual de un estudiante' })
   async revokeQR(@Param('studentId') studentId: string) {
@@ -37,9 +48,11 @@ export class IdentityController {
   }
 
   @Post('export/mass/:academicYearId')
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @RequirePermissions(SystemPermissions.IDENTITY_EXPORT) // 🔥 RBAC
   @HttpCode(HttpStatus.ACCEPTED)
-  @ApiOperation({ summary: 'Inicia la generación asíncrona de ZIP con carnets' })
+  @ApiOperation({
+    summary: 'Inicia la generación asíncrona de ZIP con carnets',
+  })
   async startMassExport(
     @Param('academicYearId') academicYearId: string,
     @Body() filters: { level?: string; classroomId?: string },

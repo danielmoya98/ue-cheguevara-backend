@@ -12,37 +12,44 @@ import {
 import { GradesService } from './grades.service';
 import { UpsertGradeDto } from './dto/upsert-grade.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+
+// 🔥 IMPORTACIONES RBAC
 import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Calificaciones (Libreta Escolar)')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 @Controller('grades')
 export class GradesController {
   constructor(private readonly gradesService: GradesService) {}
 
   @Put()
-  @Roles(Role.ADMIN, Role.DOCENTE) // Director y Docente pueden calificar
+  @RequirePermissions(SystemPermissions.GRADES_WRITE) // 🔥 RBAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ingresa o actualiza la nota de un estudiante' })
   upsertGrade(@Body() upsertGradeDto: UpsertGradeDto, @Req() req: any) {
-    // Obtenemos el ID del usuario logueado para la auditoría
-    const userId = req.user.id;
-    return this.gradesService.upsertGrade(upsertGradeDto, userId);
+    // Pasamos el objeto usuario completo para ejecutar políticas ABAC
+    return this.gradesService.upsertGrade(upsertGradeDto, req.user);
   }
 
   @Get('assignment/:assignmentId/trimester/:trimesterId')
-  @Roles(Role.ADMIN, Role.DOCENTE)
+  @RequirePermissions(SystemPermissions.GRADES_READ) // 🔥 RBAC
   @ApiOperation({
     summary: 'Obtiene la planilla de notas de un curso para una materia',
   })
   getGradesByAssignment(
     @Param('assignmentId') assignmentId: string,
     @Param('trimesterId') trimesterId: string,
+    @Req() req: any,
   ) {
-    return this.gradesService.getGradesByAssignment(assignmentId, trimesterId);
+    // Pasamos el objeto usuario completo para ejecutar políticas ABAC
+    return this.gradesService.getGradesByAssignment(
+      assignmentId,
+      trimesterId,
+      req.user,
+    );
   }
 }

@@ -13,18 +13,6 @@ datasource db {
   provider = "postgresql"
 }
 
-// ==========================================
-// ENUMS (Dominios de datos estrictos oficiales)
-// ==========================================
-
-enum Role {
-  ADMIN // Director / Administrador principal
-  SECRETARIA // Secretaría Académica
-  DOCENTE // Plantel Docente (Web & App)
-  PADRE // Para la App Móvil
-  ESTUDIANTE // Para la App Móvil
-}
-
 enum UserStatus {
   ACTIVE // Puede ingresar al sistema
   INACTIVE // Cuenta bloqueada/suspendida
@@ -62,7 +50,55 @@ enum EducationLevel {
 
 // ==========================================
 // MODELOS
+// ========================================
 // ==========================================
+// MÓDULO DE SEGURIDAD (RBAC)
+// ==========================================
+
+model Role {
+  id          String  @id @default(uuid())
+  name        String  @unique // Ej. "SUPER_ADMIN", "DIRECTOR", "DOCENTE"
+  description String?
+
+  permissions RolePermission[]
+  users       User[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(uuid())
+  action      String // Ej. "create", "read", "update", "delete", "manage"
+  subject     String // Ej. "Grades", "Users", "Institutions", "all"
+  description String?
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([action, subject])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ⚠️ EN TU MODELO USER:
+// Reemplaza `role Role @default(DOCENTE)` por:
+// roleId String @map("role_id")
+// role   Role   @relation(fields: [roleId], references: [id])
 
 model User {
   id       String @id @default(uuid())
@@ -71,7 +107,8 @@ model User {
   fullName String @map("full_name")
 
   // Control de Accesos
-  role   Role       @default(DOCENTE)
+  roleId String     @map("role_id")
+  role   Role       @relation(fields: [roleId], references: [id])
   status UserStatus @default(ACTIVE)
 
   // Flujo de Onboarding (Setup Password)

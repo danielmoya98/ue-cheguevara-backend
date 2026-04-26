@@ -10,21 +10,24 @@ import {
   HttpCode,
   HttpStatus,
   UseInterceptors,
+  Req,
 } from '@nestjs/common';
 import { TeacherAssignmentsService } from './teacher-assignments.service';
 import { CreateTeacherAssignmentDto } from './dto/create-teacher-assignment.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { CloneAssignmentsDto } from './dto/clone-assignments.dto';
 
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
+
 @ApiTags('Carga Horaria (Asignación)')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 @Controller('teacher-assignments')
 export class TeacherAssignmentsController {
   constructor(
@@ -32,7 +35,7 @@ export class TeacherAssignmentsController {
   ) {}
 
   @Post()
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_WRITE) // 🔥 Solo Admin
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Asigna un docente a una materia en un curso específico',
@@ -42,7 +45,7 @@ export class TeacherAssignmentsController {
   }
 
   @Post('clone')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_WRITE) // 🔥 Solo Admin
   @UseInterceptors(IdempotencyInterceptor)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -53,10 +56,8 @@ export class TeacherAssignmentsController {
   }
 
   @Get()
-  @ApiOperation({
-    summary:
-      'Obtiene el listado de carga horaria (filtrable por curso, docente o gestión)',
-  })
+  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_READ)
+  @ApiOperation({ summary: 'Obtiene el listado de carga horaria' })
   findAll(
     @Query()
     query: PaginationDto & {
@@ -64,12 +65,14 @@ export class TeacherAssignmentsController {
       classroomId?: string;
       teacherId?: string;
     },
+    @Req() req: any,
   ) {
-    return this.teacherAssignmentsService.findAll(query);
+    // 🔥 Pasamos el usuario para que el servicio aplique ABAC
+    return this.teacherAssignmentsService.findAll(query, req.user);
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_WRITE) // 🔥 Solo Admin
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina una asignación de carga horaria' })
   remove(@Param('id') id: string) {

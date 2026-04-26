@@ -19,13 +19,15 @@ export class DataUpdatesService {
   ) {}
 
   // ====================================================================
-  // 🛡️ REGLAS DE SEGURIDAD Y LÍMITES
+  // 🛡️ REGLAS DE SEGURIDAD Y LÍMITES (Con blindaje de Año Académico)
   // ====================================================================
   private async validateCampaignAndLimits(enrollmentId: string) {
     const institution = await this.prisma.institution.findFirst();
 
     if (!institution || !institution.enableDigitalRudeUpdates) {
-      throw new BadRequestException('El periodo de actualización digital de datos se encuentra cerrado.');
+      throw new BadRequestException(
+        'El periodo de actualización digital de datos se encuentra cerrado.',
+      );
     }
 
     const enrollment = await this.prisma.enrollment.findUnique({
@@ -33,32 +35,43 @@ export class DataUpdatesService {
       include: {
         student: { include: { guardians: { include: { guardian: true } } } },
         rudeRecord: true,
+        academicYear: true, // 🔥 Requerido para validar gestión
       },
     });
 
     if (!enrollment) throw new NotFoundException('Inscripción no encontrada.');
 
+    // 🔥 BLOQUEO DE ENLACES VIEJOS: No se pueden modificar gestiones históricas
+    if (enrollment.academicYear.status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'Por seguridad, no se permite actualizar datos de una gestión escolar pasada o cerrada.',
+      );
+    }
+
     if (enrollment.status === 'RETIRADO' || enrollment.status === 'TRASLADO') {
-      throw new BadRequestException('No se pueden actualizar los datos de un estudiante inactivo o trasladado.');
+      throw new BadRequestException(
+        'No se pueden actualizar los datos de un estudiante inactivo o trasladado.',
+      );
     }
 
     if (enrollment.rudeUpdateCount >= institution.maxRudeUpdatesPerYear) {
-      throw new BadRequestException(`Ha superado el límite máximo de ${institution.maxRudeUpdatesPerYear} actualizaciones permitidas por año. Por favor, acérquese a Secretaría para cambios adicionales.`);
+      throw new BadRequestException(
+        `Ha superado el límite máximo de ${institution.maxRudeUpdatesPerYear} actualizaciones permitidas por año. Por favor, acérquese a Secretaría.`,
+      );
     }
 
     return enrollment;
   }
 
-  // ====================================================================
-  // 🌐 LECTURA: EL PADRE ABRE EL ENLACE
-  // ====================================================================
   async verifyTokenAndGetData(token: string) {
     let enrollmentId: string;
     try {
       const payload = await this.jwtService.verifyAsync(token);
       enrollmentId = payload.enrollmentId;
     } catch (error) {
-      throw new UnauthorizedException('El enlace es inválido o ha expirado por seguridad. Solicite uno nuevo al colegio.');
+      throw new UnauthorizedException(
+        'El enlace es inválido o ha expirado por seguridad. Solicite uno nuevo al colegio.',
+      );
     }
 
     const enrollment = await this.validateCampaignAndLimits(enrollmentId);
@@ -68,7 +81,9 @@ export class DataUpdatesService {
     });
 
     if (pendingRequest) {
-      throw new BadRequestException('Sus datos ya fueron enviados y se encuentran en revisión por Secretaría.');
+      throw new BadRequestException(
+        'Sus datos ya fueron enviados y se encuentran en revisión por Secretaría.',
+      );
     }
 
     return {
@@ -86,15 +101,15 @@ export class DataUpdatesService {
           birthDate: enrollment.student.birthDate,
           gender: enrollment.student.gender,
         },
-        guardians: enrollment.student.guardians.map((g) => ({ relationship: g.relationship, ...g.guardian })),
+        guardians: enrollment.student.guardians.map((g) => ({
+          relationship: g.relationship,
+          ...g.guardian,
+        })),
         rudeRecord: enrollment.rudeRecord,
       },
     };
   }
 
-  // ====================================================================
-  // 🌐 ESCRITURA: EL PADRE ENVÍA EL FORMULARIO (Cuarentena)
-  // ====================================================================
   async submitUpdate(token: string, proposedData: any) {
     let enrollmentId: string;
     try {
@@ -123,7 +138,8 @@ export class DataUpdatesService {
     }
 
     return {
-      message: 'Sus datos han sido enviados exitosamente y están a la espera de revisión por la Secretaría.',
+      message:
+        'Sus datos han sido enviados exitosamente y están a la espera de revisión por la Secretaría.',
       requestId: requestRecord.id,
     };
   }
@@ -133,11 +149,22 @@ export class DataUpdatesService {
   // ====================================================================
   async getPendingRequests() {
     return this.prisma.dataUpdateRequest.findMany({
-      where: { status: 'PENDING' },
+      where: {
+        status: 'PENDING',
+        // 🔥 FILTRO: Secretaría solo debe ver pendientes del año escolar ACTIVO
+        enrollment: { academicYear: { status: 'ACTIVE' } },
+      },
       include: {
         enrollment: {
           include: {
-            student: { select: { ci: true, names: true, lastNamePaterno: true, lastNameMaterno: true } },
+            student: {
+              select: {
+                ci: true,
+                names: true,
+                lastNamePaterno: true,
+                lastNameMaterno: true,
+              },
+            },
             classroom: { select: { grade: true, section: true, level: true } },
           },
         },
@@ -146,20 +173,24 @@ export class DataUpdatesService {
     });
   }
 
-  // ====================================================================
-  // 🔒 SECRETARÍA: RECHAZAR SOLICITUD
-  // ====================================================================
+  // ... (rejectUpdate, approveUpdate, markPhysicalDelivery y delegadores se mantienen idénticos) ...
+
   async rejectUpdate(requestId: string, reason: string) {
     const request = await this.prisma.dataUpdateRequest.findUnique({
       where: { id: requestId },
       include: { enrollment: true },
     });
-    
-    if (!request || request.status !== 'PENDING') throw new NotFoundException('La solicitud no existe o ya fue procesada.');
+
+    if (!request || request.status !== 'PENDING')
+      throw new NotFoundException('La solicitud no existe o ya fue procesada.');
 
     const updatedRequest = await this.prisma.dataUpdateRequest.update({
       where: { id: requestId },
-      data: { status: 'REJECTED', reviewedAt: new Date(), rejectionReason: reason },
+      data: {
+        status: 'REJECTED',
+        reviewedAt: new Date(),
+        rejectionReason: reason,
+      },
     });
 
     await this.broadcastService.notifyGuardiansByStudentId(
@@ -171,26 +202,33 @@ export class DataUpdatesService {
     return updatedRequest;
   }
 
-  // ====================================================================
-  // 🔒 SECRETARÍA: APROBAR Y FUSIONAR DATOS (Delega la carga pesada)
-  // ====================================================================
   async approveUpdate(requestId: string) {
     const request = await this.prisma.dataUpdateRequest.findUnique({
       where: { id: requestId },
       include: { enrollment: { include: { student: true } } },
     });
 
-    if (!request || request.status !== 'PENDING') throw new BadRequestException('La solicitud no existe o ya fue procesada.');
-    if (request.enrollment.status === 'RETIRADO' || request.enrollment.status === 'TRASLADO') {
-      throw new BadRequestException('No se pueden fusionar datos de un estudiante inactivo.');
+    if (!request || request.status !== 'PENDING')
+      throw new BadRequestException(
+        'La solicitud no existe o ya fue procesada.',
+      );
+    if (
+      request.enrollment.status === 'RETIRADO' ||
+      request.enrollment.status === 'TRASLADO'
+    ) {
+      throw new BadRequestException(
+        'No se pueden fusionar datos de un estudiante inactivo.',
+      );
     }
 
     const data: any = request.proposedData;
+    await this.transactionService.executeApprovalTransaction(
+      requestId,
+      request.enrollment.studentId,
+      request.enrollmentId,
+      data,
+    );
 
-    // 1. Ejecutamos la transacción en el servicio especializado
-    await this.transactionService.executeApprovalTransaction(requestId, request.enrollment.studentId, request.enrollmentId, data);
-
-    // 2. Notificamos mediante el servicio de Broadcast
     await this.broadcastService.notifyGuardiansByStudentId(
       request.enrollment.studentId,
       '✅ Actualización RUDE Aprobada',
@@ -203,11 +241,10 @@ export class DataUpdatesService {
     };
   }
 
-  // ====================================================================
-  // 📝 SECRETARÍA: REGISTRAR ENTREGA FÍSICA (PAPEL)
-  // ====================================================================
   async markPhysicalDelivery(enrollmentId: string) {
-    const enrollment = await this.prisma.enrollment.findUnique({ where: { id: enrollmentId } });
+    const enrollment = await this.prisma.enrollment.findUnique({
+      where: { id: enrollmentId },
+    });
     if (!enrollment) throw new NotFoundException('Inscripción no encontrada.');
 
     await this.prisma.enrollment.update({
@@ -215,34 +252,26 @@ export class DataUpdatesService {
       data: { rudeUpdateCount: 99 },
     });
 
-    return { message: 'Entrega física registrada. El tutor ya no recibirá notificaciones de actualización.' };
+    return {
+      message:
+        'Entrega física registrada. El tutor ya no recibirá notificaciones.',
+    };
   }
 
-  // ====================================================================
-  // 🔀 DELEGADORES FACHADA (Llaman al Broadcast Service)
-  // ====================================================================
+  // Delegadores
   async generateUpdateToken(enrollmentId: string) {
     return this.broadcastService.generateUpdateToken(enrollmentId);
   }
-
   async broadcastUpdateCampaign(enrollmentId: string) {
     return this.broadcastService.broadcastUpdateCampaign(enrollmentId);
   }
-
   async broadcastToClassroom(classroomId: string) {
     return this.broadcastService.broadcastToClassroom(classroomId);
   }
-
   async broadcastToAll() {
     return this.broadcastService.broadcastToAll();
   }
-
   async previewClassroomBroadcast(classroomId: string) {
-    // Si tienes el método creado en el broadcastService, llámalo así:
-    // return this.broadcastService.previewClassroomBroadcast(classroomId);
-    
-    // Si aún no lo pasaste al broadcastService, puedes poner la lógica directamente en el broadcastService y llamarlo aquí.
     return this.broadcastService.previewClassroomBroadcast(classroomId);
   }
-  
 }

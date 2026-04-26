@@ -16,22 +16,25 @@ import { SubjectsService } from './subjects.service';
 import { CreateSubjectDto } from './dto/create-subject.dto';
 import { UpdateSubjectDto } from './dto/update-subject.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role, EducationLevel } from '../../prisma/generated/client';
+import { EducationLevel } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
+
 @ApiTags('Catálogo de Materias')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Candados Activados
 @Controller('subjects')
 export class SubjectsController {
   constructor(private readonly subjectsService: SubjectsService) {}
 
   @Post()
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.SUBJECTS_WRITE) // 🔥 Solo Administradores
   @UseInterceptors(IdempotencyInterceptor) // Escudo Anti-rebotes
   @ApiOperation({ summary: 'Registra una nueva materia en el catálogo' })
   create(@Body() createSubjectDto: CreateSubjectDto) {
@@ -39,6 +42,7 @@ export class SubjectsController {
   }
 
   @Get()
+  // 🔓 Sin @RequirePermissions: Lectura abierta para usuarios logueados (útil para selects)
   @ApiOperation({
     summary: 'Obtiene el listado de materias (soporta filtro por nivel)',
   })
@@ -47,13 +51,14 @@ export class SubjectsController {
   }
 
   @Get(':id')
+  // 🔓 Lectura abierta
   @ApiOperation({ summary: 'Obtiene una materia por su ID' })
   findOne(@Param('id') id: string) {
     return this.subjectsService.findOne(id);
   }
 
   @Patch(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.SUBJECTS_WRITE) // 🔥 Solo Administradores
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualiza los datos de una materia' })
   update(@Param('id') id: string, @Body() updateSubjectDto: UpdateSubjectDto) {
@@ -61,7 +66,7 @@ export class SubjectsController {
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.SUBJECTS_WRITE) // 🔥 Solo Administradores
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina una materia del catálogo' })
   remove(@Param('id') id: string) {

@@ -12,7 +12,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { Response } from 'express';
-import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { LoginDto } from './dto/login.dto';
 import { SetupPasswordDto } from './dto/setup-password.dto';
@@ -140,17 +140,18 @@ export class AuthController {
   @Patch('fcm-token')
   @UseGuards(AuthGuard('jwt'))
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Registra el token del celular (Firebase) para recibir Push' })
-  async registerFcmToken(
-    @Req() req: any,
-    @Body('fcmToken') fcmToken: string,
-  ) {
+  @ApiOperation({
+    summary: 'Registra el token del celular (Firebase) para recibir Push',
+  })
+  async registerFcmToken(@Req() req: any, @Body('fcmToken') fcmToken: string) {
     // 🔥 AQUÍ ESTABA EL ERROR: Tu estrategia exporta 'userId', no 'sub' ni 'id'
-    const userId = req.user?.userId; 
-    
+    const userId = req.user?.userId;
+
     if (!userId) {
       // Un escudo extra por si acaso
-      throw new UnauthorizedException('No se pudo identificar al usuario en el token');
+      throw new UnauthorizedException(
+        'No se pudo identificar al usuario en el token',
+      );
     }
 
     return this.authService.registerFcmToken(userId, fcmToken);

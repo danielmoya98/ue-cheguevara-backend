@@ -19,29 +19,31 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
-import { CacheTTL } from '@nestjs/cache-manager'; // <-- 1. Importamos TTL
-import { UserProfileCacheInterceptor } from '../common/interceptors/user-profile-cache.interceptor'; // <-- 2. Interceptor personalizado
+import { CacheTTL } from '@nestjs/cache-manager';
+import { UserProfileCacheInterceptor } from '../common/interceptors/user-profile-cache.interceptor';
+
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Usuarios')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 @Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   // =======================================================
-  // ENDPOINTS DE PERFIL CACHEADOS
+  // ENDPOINTS DE PERFIL CACHEADOS (Acceso Libre)
   // =======================================================
 
   @Get('profile')
-  @UseInterceptors(UserProfileCacheInterceptor) // <-- Caché segura por Usuario
-  @CacheTTL(60000) // <-- 1 minuto de vida en RAM (60,000 ms)
+  @UseInterceptors(UserProfileCacheInterceptor)
+  @CacheTTL(60000)
   @ApiOperation({
     summary: 'Obtiene los datos del perfil del usuario logueado',
   })
@@ -51,9 +53,7 @@ export class UsersController {
 
   @Patch('profile')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Actualiza los datos básicos de mi perfil (C.I., celular, etc.)',
-  })
+  @ApiOperation({ summary: 'Actualiza los datos básicos de mi perfil' })
   updateProfile(@Req() req: any, @Body() updateProfileDto: UpdateProfileDto) {
     return this.usersService.updateProfile(req.user.userId, updateProfileDto);
   }
@@ -69,35 +69,34 @@ export class UsersController {
   }
 
   // =======================================================
-  // ENDPOINTS ADMINISTRATIVOS (IDEMPOTENCIA ACTIVADA)
+  // ENDPOINTS ADMINISTRATIVOS (Protegidos con RBAC)
   // =======================================================
 
   @Post()
-  @Roles(Role.ADMIN)
-  @UseInterceptors(IdempotencyInterceptor) // <-- Protege contra clics dobles
-  @ApiOperation({ summary: 'Crear un nuevo usuario (Soporta Idempotencia)' })
+  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
+  @UseInterceptors(IdempotencyInterceptor)
+  @ApiOperation({ summary: 'Crear un nuevo usuario' })
   create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
   }
 
   @Get()
+  @RequirePermissions(SystemPermissions.USERS_READ) // 🔥 Solo Admin
   @ApiOperation({ summary: 'Obtener lista de todos los usuarios paginada' })
   findAll(@Query() query: PaginationDto) {
     return this.usersService.findAll(query);
   }
 
   @Patch(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Actualizar nombre o rol de un usuario (Requiere rol ADMIN)',
-  })
+  @ApiOperation({ summary: 'Actualizar nombre o rol de un usuario' })
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
     return this.usersService.update(id, updateUserDto);
   }
 
   @Delete(':id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Desactivar un usuario por su ID (Soft Delete)' })
   remove(@Param('id') id: string) {
@@ -105,20 +104,18 @@ export class UsersController {
   }
 
   @Patch(':id/reactivate')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Reactivar a un usuario inactivo (Requiere ADMIN)' })
+  @ApiOperation({ summary: 'Reactivar a un usuario inactivo' })
   reactivate(@Param('id') id: string) {
     return this.usersService.reactivate(id);
   }
 
   @Post(':id/reset-password')
+  @RequirePermissions(SystemPermissions.USERS_WRITE) // 🔥 Solo Admin
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.ADMIN)
-  @UseInterceptors(IdempotencyInterceptor) // <-- Protege contra clics dobles
-  @ApiOperation({
-    summary: 'Genera una nueva contraseña temporal (Soporta Idempotencia)',
-  })
+  @UseInterceptors(IdempotencyInterceptor)
+  @ApiOperation({ summary: 'Genera una nueva contraseña temporal' })
   resetPassword(@Param('id') id: string) {
     return this.usersService.resetPassword(id);
   }

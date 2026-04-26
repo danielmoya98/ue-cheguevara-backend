@@ -7,25 +7,26 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateTeacherAssignmentDto } from './dto/create-teacher-assignment.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { Role } from '../../prisma/generated/client';
 import { CloneAssignmentsDto } from './dto/clone-assignments.dto';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @Injectable()
 export class TeacherAssignmentsService {
   constructor(private prisma: PrismaService) {}
 
   async create(data: CreateTeacherAssignmentDto) {
-    // 1. Validar que el usuario asignado sea realmente un DOCENTE
+    // 🔥 BUG CORREGIDO: Buscamos la relación role en lugar del enum estático
     const teacher = await this.prisma.user.findUnique({
       where: { id: data.teacherId },
+      include: { role: true },
     });
-    if (!teacher || teacher.role !== Role.DOCENTE) {
+
+    if (!teacher || teacher.role?.name !== 'DOCENTE') {
       throw new BadRequestException(
         'El usuario asignado no existe o no tiene el rol de DOCENTE.',
       );
     }
 
-    // 2. Intentar crear la asignación
     try {
       return await this.prisma.teacherAssignment.create({
         data,
@@ -35,8 +36,7 @@ export class TeacherAssignmentsService {
           classroom: { select: { grade: true, section: true } },
         },
       });
-    } catch (error) {
-      // P2002: Prisma detecta violación de nuestro @@unique([classroomId, subjectId])
+    } catch (error: any) {
       if (error.code === 'P2002') {
         throw new ConflictException(
           'Este curso ya tiene un docente asignado para esta materia.',
@@ -46,8 +46,6 @@ export class TeacherAssignmentsService {
     }
   }
 
-  // ... (debajo del método create)
-
   async cloneAssignments(data: CloneAssignmentsDto) {
     if (data.targetClassroomIds.length === 0 || data.assignments.length === 0) {
       throw new BadRequestException(
@@ -55,7 +53,6 @@ export class TeacherAssignmentsService {
       );
     }
 
-    // ✅ SOLUCIÓN: Definimos explícitamente la estructura del Array para TypeScript
     const recordsToInsert: {
       classroomId: string;
       subjectId: string;
@@ -82,24 +79,29 @@ export class TeacherAssignmentsService {
       clonedCount: result.count,
     };
   }
-  // Obtenemos las asignaciones filtrando dinámicamente por Año, Curso o Docente
+
   async findAll(
     query: PaginationDto & {
       academicYearId?: string;
       classroomId?: string;
       teacherId?: string;
     },
+    user: any,
   ) {
     const page = Number(query.page) || 1;
-    const limit = Number(query.limit) || 20; // Aumentamos el límite porque las cargas horarias son largas
+    const limit = Number(query.limit) || 20;
     const skip = (page - 1) * limit;
 
-    const { academicYearId, classroomId, teacherId } = query;
+    let { academicYearId, classroomId, teacherId } = query;
+
+    // 🔥 ABAC: Si es un Docente, forzamos que solo vea SU propia carga horaria
+    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+      teacherId = user.userId;
+    }
 
     const whereCondition: any = {
       ...(classroomId && { classroomId }),
       ...(teacherId && { teacherId }),
-      // Si mandamos el año escolar, buscamos dentro de la relación de cursos
       ...(academicYearId && { classroom: { academicYearId } }),
     };
 
@@ -141,11 +143,32 @@ export class TeacherAssignmentsService {
     const assignment = await this.prisma.teacherAssignment.findUnique({
       where: { id },
     });
+
     if (!assignment) {
       throw new NotFoundException('Asignación no encontrada');
     }
 
-    // TODO en Fase Estudiantes: Validar que no haya notas registradas antes de quitar al docente
+    // 🔥 DEUDA TÉCNICA RESUELTA: Protección de Integridad (Calificaciones)
+    const gradesCount = await this.prisma.grade.count({
+      where: { teacherAssignmentId: id },
+    });
+
+    if (gradesCount > 0) {
+      throw new ConflictException(
+        'Operación bloqueada: No se puede quitar al docente porque ya existen calificaciones registradas para esta materia.',
+      );
+    }
+
+    // 🔥 DEUDA TÉCNICA RESUELTA: Protección de Integridad (Horarios)
+    const schedulesCount = await this.prisma.scheduleSlot.count({
+      where: { teacherAssignmentId: id },
+    });
+
+    if (schedulesCount > 0) {
+      throw new ConflictException(
+        'Operación bloqueada: No se puede eliminar esta asignación porque la materia ya está distribuida en el Horario Escolar.',
+      );
+    }
 
     await this.prisma.teacherAssignment.delete({ where: { id } });
     return { message: 'Asignación eliminada correctamente' };

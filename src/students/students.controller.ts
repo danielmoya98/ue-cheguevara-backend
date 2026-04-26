@@ -21,11 +21,17 @@ import {
   ApiBody,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+
+// 🔥 IMPORTACIONES RBAC
 import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('Inscripciones y RUDE')
 @Controller('students')
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 export class StudentsController {
   constructor(
     private readonly studentsService: StudentsService,
@@ -33,6 +39,7 @@ export class StudentsController {
   ) {}
 
   @Post('register-rude')
+  @RequirePermissions(SystemPermissions.STUDENTS_WRITE) // 🔥 Solo Admin/Secretaría
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
     summary:
@@ -43,6 +50,7 @@ export class StudentsController {
   }
 
   @Post('import-excel/:academicYearId')
+  @RequirePermissions(SystemPermissions.STUDENTS_WRITE) // 🔥 Solo Admin/Secretaría
   @UseInterceptors(FileInterceptor('file'))
   @ApiOperation({
     summary: 'Importa estudiantes masivamente a un curso específico',
@@ -62,7 +70,7 @@ export class StudentsController {
     @UploadedFile() file: Express.Multer.File,
     @Param('academicYearId') academicYearId: string,
     @Body('status') globalStatus: string,
-    @Body('classroomId') classroomId: string, // <-- RECIBIMOS EL CURSO DESDE LA WEB
+    @Body('classroomId') classroomId: string,
   ) {
     return this.studentsService.importStudentsFromExcel(
       file,
@@ -72,15 +80,15 @@ export class StudentsController {
     );
   }
 
-  // 🔥 NUEVO: Recibe el token de FCM desde Flutter
+  // 🔥 RUTA DE APP MÓVIL: Sin RequirePermissions. Pasa si tiene JWT válido.
   @Patch('fcm-token')
   @ApiBearerAuth()
-  @UseGuards(AuthGuard('jwt')) // Solo accesible desde la app con token Bearer
   @ApiOperation({
     summary: 'Registra el dispositivo móvil para notificaciones Push',
   })
-  async updateFcmToken(@Req() req, @Body('token') fcmToken: string) {
-    const userId = req.user.sub;
+  async updateFcmToken(@Req() req: any, @Body('token') fcmToken: string) {
+    // 🔥 BUG CORREGIDO: Usamos userId en lugar de sub
+    const userId = req.user.userId;
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) return { status: 'ERROR', message: 'Usuario no encontrado' };

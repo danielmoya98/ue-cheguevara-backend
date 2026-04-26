@@ -9,7 +9,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as nodemailer from 'nodemailer';
-import { Role } from '../../prisma/generated/client';
 import { RegisterStudentDto } from './dto/register-student.dto';
 import { RegisterGuardianDto } from './dto/register-guardian.dto';
 
@@ -49,10 +48,23 @@ export class AuthService {
   }
 
   // ====================================================================
-  // LOGIN ESTÁNDAR (WEB Y MÓVIL)
+  // LOGIN ESTÁNDAR (WEB Y MÓVIL) - ACTUALIZADO RBAC
   // ====================================================================
   async login(email: string, pass: string) {
-    const user = await this.prisma.user.findUnique({ where: { email } });
+    // 1. Join masivo SOLO en el Login para extraer permisos
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: { permission: true },
+            },
+          },
+        },
+      },
+    });
+
     if (!user) throw new UnauthorizedException('Credenciales incorrectas');
 
     const isMatch = await bcrypt.compare(pass, user.password);
@@ -74,7 +86,19 @@ export class AuthService {
       };
     }
 
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    // 2. Aplanamos los permisos para el JWT. Formato: "accion:recurso"
+    const userPermissions =
+      user.role?.permissions.map(
+        (rp) => `${rp.permission.action}:${rp.permission.subject}`,
+      ) || [];
+
+    // 3. Payload Blindado
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      roleName: user.role?.name || 'GUEST',
+      permissions: userPermissions,
+    };
 
     await this.prisma.user.update({
       where: { id: user.id },
@@ -84,12 +108,17 @@ export class AuthService {
     return {
       status: 'SUCCESS',
       access_token: await this.jwtService.signAsync(payload),
-      user: { id: user.id, fullName: user.fullName, role: user.role },
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        role: user.role?.name,
+        permissions: userPermissions,
+      },
     };
   }
 
   // ====================================================================
-  // CONFIGURACIÓN DE CONTRASEÑA INICIAL (DIRECTORES/DOCENTES)
+  // CONFIGURACIÓN DE CONTRASEÑA INICIAL - ACTUALIZADO RBAC
   // ====================================================================
   async setupNewPassword(setupToken: string, newPasswordRaw: string) {
     let userId: string;
@@ -108,24 +137,37 @@ export class AuthService {
       );
     }
 
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
-    if (!user) throw new UnauthorizedException('Usuario no encontrado');
-
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPasswordRaw, salt);
 
+    // Actualizamos al usuario Y traemos sus permisos para firmar el token final
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: {
         password: hashedPassword,
         requiresPasswordChange: false,
       },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: { permission: true },
+            },
+          },
+        },
+      },
     });
+
+    const userPermissions =
+      updatedUser.role?.permissions.map(
+        (rp) => `${rp.permission.action}:${rp.permission.subject}`,
+      ) || [];
 
     const payload = {
       sub: updatedUser.id,
       email: updatedUser.email,
-      role: updatedUser.role,
+      roleName: updatedUser.role?.name,
+      permissions: userPermissions,
     };
 
     return {
@@ -136,7 +178,7 @@ export class AuthService {
   }
 
   // ====================================================================
-  // REGISTRO APP MÓVIL: PADRES / TUTORES
+  // REGISTRO APP MÓVIL: PADRES / TUTORES - ACTUALIZADO RBAC
   // ====================================================================
   async registerGuardian(dto: RegisterGuardianDto) {
     const guardian = await this.prisma.guardian.findUnique({
@@ -159,6 +201,16 @@ export class AuthService {
       );
     }
 
+    // 🔥 Buscamos el rol dinámicamente
+    const rolePadre = await this.prisma.role.findUnique({
+      where: { name: 'PADRE' },
+    });
+    if (!rolePadre) {
+      throw new NotFoundException(
+        'Error crítico: El rol PADRE no existe en la base de datos.',
+      );
+    }
+
     const institutionalEmail = this.generateInstitutionalEmail(
       guardian.names,
       guardian.lastNamePaterno || '',
@@ -176,17 +228,30 @@ export class AuthService {
         email: institutionalEmail,
         password: hashedPassword,
         fullName: fullName,
-        role: Role.PADRE,
+        roleId: rolePadre.id, // Asignación relacional
         guardianId: guardian.id,
-        recoveryEmail: dto.recoveryEmail, // 🔥 Guardamos el correo de respaldo
+        recoveryEmail: dto.recoveryEmail,
         requiresPasswordChange: false,
       },
+      include: {
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
+      },
     });
+
+    const userPermissions =
+      newUser.role?.permissions.map(
+        (rp) => `${rp.permission.action}:${rp.permission.subject}`,
+      ) || [];
 
     const payload = {
       sub: newUser.id,
       email: newUser.email,
-      role: newUser.role,
+      roleName: newUser.role?.name,
+      permissions: userPermissions,
     };
 
     return {
@@ -196,14 +261,14 @@ export class AuthService {
       user: {
         id: newUser.id,
         fullName: newUser.fullName,
-        role: newUser.role,
+        role: newUser.role?.name,
         email: newUser.email,
       },
     };
   }
 
   // ====================================================================
-  // REGISTRO APP MÓVIL: ESTUDIANTES
+  // REGISTRO APP MÓVIL: ESTUDIANTES - ACTUALIZADO RBAC
   // ====================================================================
   async registerStudent(dto: RegisterStudentDto) {
     const startDate = new Date(dto.birthDate);
@@ -236,6 +301,16 @@ export class AuthService {
       );
     }
 
+    // 🔥 Buscamos el rol dinámicamente
+    const roleStudent = await this.prisma.role.findUnique({
+      where: { name: 'ESTUDIANTE' },
+    });
+    if (!roleStudent) {
+      throw new NotFoundException(
+        'Error crítico: El rol ESTUDIANTE no existe en el sistema.',
+      );
+    }
+
     const institutionalEmail = this.generateInstitutionalEmail(
       student.names,
       student.lastNamePaterno || '',
@@ -250,17 +325,30 @@ export class AuthService {
         email: institutionalEmail,
         password: hashedPassword,
         fullName: `${student.names} ${student.lastNamePaterno || ''}`.trim(),
-        role: Role.ESTUDIANTE,
+        roleId: roleStudent.id, // Asignación relacional
         studentId: student.id,
-        recoveryEmail: dto.recoveryEmail, // 🔥 Guardamos el correo de respaldo
+        recoveryEmail: dto.recoveryEmail,
         requiresPasswordChange: false,
       },
+      include: {
+        role: {
+          include: {
+            permissions: { include: { permission: true } },
+          },
+        },
+      },
     });
+
+    const userPermissions =
+      newUser.role?.permissions.map(
+        (rp) => `${rp.permission.action}:${rp.permission.subject}`,
+      ) || [];
 
     const payload = {
       sub: newUser.id,
       email: newUser.email,
-      role: newUser.role,
+      roleName: newUser.role?.name,
+      permissions: userPermissions,
     };
 
     return {
@@ -270,7 +358,7 @@ export class AuthService {
       user: {
         id: newUser.id,
         fullName: newUser.fullName,
-        role: newUser.role,
+        role: newUser.role?.name,
         email: newUser.email,
       },
     };
@@ -391,7 +479,7 @@ export class AuthService {
   }
 
   // ====================================================================
-  // 🔥 CORREGIDO: REGISTRAR EL DISPOSITIVO MÓVIL (FCM TOKEN)
+  // 🔥 REGISTRAR EL DISPOSITIVO MÓVIL (FCM TOKEN)
   // ====================================================================
   async registerFcmToken(userId: string, fcmToken: string) {
     if (!userId) {
@@ -409,8 +497,6 @@ export class AuthService {
       await this.prisma.user.update({
         where: { id: userId },
         data: {
-          // 🔥 MAGIA ANTI-500: Usamos el operador spread de JS en lugar de 'push' de Prisma.
-          // Esto funciona 100% de las veces sin importar si la BD estaba en null.
           fcmTokens: [...currentTokens, fcmToken],
         },
       });

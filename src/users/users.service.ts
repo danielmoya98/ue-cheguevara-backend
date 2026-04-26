@@ -3,14 +3,14 @@ import {
   ConflictException,
   NotFoundException,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
-import { Role } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
-import { UpdateUserDto } from './dto/update-user.dto'; // <-- Importamos el DTO de Admin
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @Injectable()
 export class UsersService {
@@ -27,16 +27,18 @@ export class UsersService {
         id: true,
         fullName: true,
         email: true,
-        role: true,
         status: true,
         ci: true,
         phone: true,
         address: true,
         specialty: true,
+        role: { select: { name: true } }, // 🔥 Obtenemos el nombre del rol
       },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
-    return user;
+
+    // Aplanamos el rol para mantener el contrato con el Frontend
+    return { ...user, role: user.role?.name };
   }
 
   async updateProfile(userId: string, data: UpdateProfileDto) {
@@ -56,15 +58,18 @@ export class UsersService {
         id: true,
         fullName: true,
         email: true,
-        role: true,
         ci: true,
         phone: true,
         address: true,
         specialty: true,
+        role: { select: { name: true } },
       },
     });
 
-    return { message: 'Perfil actualizado exitosamente', user: updatedUser };
+    return {
+      message: 'Perfil actualizado exitosamente',
+      user: { ...updatedUser, role: updatedUser.role?.name },
+    };
   }
 
   async changePassword(userId: string, data: ChangePasswordDto) {
@@ -97,13 +102,22 @@ export class UsersService {
     fullName: string;
     email: string;
     passwordRaw: string;
-    role: Role;
+    role: string;
   }) {
     const existingUser = await this.prisma.user.findUnique({
       where: { email: data.email },
     });
     if (existingUser)
       throw new ConflictException('El correo ya está registrado');
+
+    // 🔥 Buscamos dinámicamente el ID del rol
+    const roleRecord = await this.prisma.role.findUnique({
+      where: { name: data.role },
+    });
+    if (!roleRecord)
+      throw new BadRequestException(
+        `El rol '${data.role}' no existe en el sistema.`,
+      );
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(data.passwordRaw, salt);
@@ -113,21 +127,20 @@ export class UsersService {
         fullName: data.fullName,
         email: data.email,
         password: hashedPassword,
-        role: data.role,
-        requiresPasswordChange: true, // 🔥 CORRECCIÓN CRÍTICA DE SEGURIDAD
+        roleId: roleRecord.id, // 🔥 Asignación relacional
+        requiresPasswordChange: true,
       },
+      include: { role: true },
     });
 
     const { password, ...result } = newUser;
-    return result;
+    return { ...result, role: result.role?.name };
   }
 
-  async findAll(query: PaginationDto) {
-    // 🔥 CORRECCIÓN: Extraemos el 'role' del query
+  async findAll(query: PaginationDto & { role?: string }) {
     const { page = 1, limit = 10, search, sort, role } = query;
     const skip = (page - 1) * limit;
 
-    // 🔥 CORRECCIÓN: Filtro dinámico combinando Búsqueda y Rol
     const whereCondition: any = {
       AND: [
         search
@@ -138,7 +151,7 @@ export class UsersService {
               ],
             }
           : {},
-        role ? { role: role } : {}, // Si viene el rol, filtramos en la BD
+        role ? { role: { name: role } } : {}, // 🔥 Filtro relacional
       ],
     };
 
@@ -162,47 +175,60 @@ export class UsersService {
           id: true,
           fullName: true,
           email: true,
-          role: true,
           status: true,
           lastLoginAt: true,
+          role: { select: { name: true } }, // 🔥 Obtenemos el nombre del rol
         },
       }),
     ]);
 
+    // Aplanamos el arreglo para el frontend
+    const mappedData = data.map((u) => ({ ...u, role: u.role?.name }));
+
     return {
-      data,
+      data: mappedData,
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
 
-  // <-- NUEVO: Editar usuario desde Admin
-  async update(id: string, data: UpdateUserDto) {
+  async update(id: string, data: UpdateUserDto & { role?: string }) {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user)
-      throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+    if (!user) throw new NotFoundException(`Usuario no encontrado`);
+
+    let roleId: string | undefined = undefined;
+    if (data.role) {
+      const roleRecord = await this.prisma.role.findUnique({
+        where: { name: data.role },
+      });
+      if (!roleRecord)
+        throw new BadRequestException(`El rol '${data.role}' no existe.`);
+      roleId = roleRecord.id;
+    }
 
     const updatedUser = await this.prisma.user.update({
       where: { id },
       data: {
         ...(data.fullName !== undefined && { fullName: data.fullName }),
-        ...(data.role !== undefined && { role: data.role }),
+        ...(roleId !== undefined && { roleId }), // 🔥 Actualización relacional
       },
       select: {
         id: true,
         fullName: true,
         email: true,
-        role: true,
         status: true,
+        role: { select: { name: true } },
       },
     });
 
-    return { message: 'Usuario actualizado exitosamente', user: updatedUser };
+    return {
+      message: 'Usuario actualizado exitosamente',
+      user: { ...updatedUser, role: updatedUser.role?.name },
+    };
   }
 
   async remove(id: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user)
-      throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+    if (!user) throw new NotFoundException(`Usuario no encontrado`);
 
     await this.prisma.user.update({
       where: { id },
@@ -211,11 +237,9 @@ export class UsersService {
     return { message: 'Usuario desactivado del sistema exitosamente' };
   }
 
-  // <-- NUEVO: Reactivar usuario desde Admin
   async reactivate(id: string) {
     const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user)
-      throw new NotFoundException(`Usuario con ID ${id} no encontrado`);
+    if (!user) throw new NotFoundException(`Usuario no encontrado`);
 
     await this.prisma.user.update({
       where: { id },
@@ -225,7 +249,10 @@ export class UsersService {
   }
 
   async resetPassword(id: string) {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      include: { role: true },
+    });
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
     const newRawPassword =
@@ -243,7 +270,7 @@ export class UsersService {
       newPassword: newRawPassword,
       email: user.email,
       fullName: user.fullName,
-      role: user.role,
+      role: user.role?.name,
     };
   }
 }

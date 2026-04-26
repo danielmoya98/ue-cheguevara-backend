@@ -13,7 +13,7 @@ export class PhysicalSpacesService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(createPhysicalSpaceDto: CreatePhysicalSpaceDto) {
-    // Verificamos que no exista un aula con exactamente el mismo nombre (ej. dos "Aula 101")
+    // Verificamos que no exista un aula con exactamente el mismo nombre
     const existingSpace = await this.prisma.physicalSpace.findFirst({
       where: {
         name: {

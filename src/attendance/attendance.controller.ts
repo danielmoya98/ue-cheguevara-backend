@@ -1,65 +1,92 @@
-import { Controller, Post,Patch ,Body, Req, UseGuards, HttpCode, HttpStatus, Get, Query, Param } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Patch,
+  Body,
+  Req,
+  UseGuards,
+  HttpCode,
+  HttpStatus,
+  Get,
+  Query,
+  Param,
+} from '@nestjs/common';
 import { AttendanceService } from './attendance.service';
 import { RegisterAttendanceDto } from './dto/register-attendance.dto';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '../../prisma/generated/client';
-import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 import { GetMonitorDto } from './dto/get-monitor.dto';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
+import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Control de Asistencia')
 @ApiCookieAuth('uecg_access_token')
 @Controller('attendance')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // Escudo Activado
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
   @Post('scan')
-  @Roles(Role.DOCENTE, Role.ADMIN, Role.SECRETARIA)
+  @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Registra asistencia mediante escaneo QR' })
   async scanQR(@Body() dto: RegisterAttendanceDto, @Req() req: any) {
-    // req.user.userId es el UUID del profesor logueado en la Web/App que está escaneando
-    return this.attendanceService.registerScan(dto, req.user.userId);
+    return this.attendanceService.registerScan(dto, req.user);
   }
 
   @Get('monitor')
-  @Roles(Role.ADMIN, Role.SECRETARIA, Role.DOCENTE)
-  @ApiOperation({ summary: 'Obtiene la lista de alumnos de un curso y su estado de asistencia' })
-  async getDailyMonitor(@Query() query: GetMonitorDto) {
-    // 🛡️ REGLA FUTURA: Si req.user.role === 'DOCENTE', aquí llamaremos a un servicio 
-    // que verifique si el docente está asignado a ese 'query.classroomId' a esa hora.
-    // Como estamos en Modo Admin, todos pasan libremente por ahora.
-    
-    return this.attendanceService.getDailyMonitor(query);
+  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @ApiOperation({
+    summary:
+      'Obtiene la lista de alumnos de un curso y su estado de asistencia',
+  })
+  async getDailyMonitor(@Query() query: GetMonitorDto, @Req() req: any) {
+    return this.attendanceService.getDailyMonitor(query, req.user);
   }
 
   @Post('manual')
-  @Roles(Role.ADMIN, Role.SECRETARIA, Role.DOCENTE)
-  @ApiOperation({ summary: 'Marca o corrige la asistencia manualmente (Plan B)' })
-  async markManualAttendance(@Body() dto: ManualAttendanceDto, @Req() req: any) {
-    // req.user.userId es el UUID del Admin o Docente que hizo clic en el botón
-    return this.attendanceService.markManualAttendance(dto, req.user.userId);
+  @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
+  @ApiOperation({
+    summary: 'Marca o corrige la asistencia manualmente (Plan B)',
+  })
+  async markManualAttendance(
+    @Body() dto: ManualAttendanceDto,
+    @Req() req: any,
+  ) {
+    return this.attendanceService.markManualAttendance(dto, req.user);
   }
 
   @Get('history/:enrollmentId')
-  @Roles(Role.ADMIN, Role.SECRETARIA)
-  @ApiOperation({ summary: 'Obtiene historial de faltas/atrasos para justificar' })
-  async getHistory(@Param('enrollmentId') enrollmentId: string) {
-    return this.attendanceService.getStudentAttendanceHistory(enrollmentId);
+  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @ApiOperation({
+    summary: 'Obtiene historial de faltas/atrasos para justificar',
+  })
+  async getHistory(
+    @Param('enrollmentId') enrollmentId: string,
+    @Req() req: any,
+  ) {
+    return this.attendanceService.getStudentAttendanceHistory(
+      enrollmentId,
+      req.user,
+    );
   }
 
   @Patch('justify/:id')
-  @Roles(Role.ADMIN, Role.SECRETARIA)
+  @RequirePermissions(SystemPermissions.ATTENDANCE_JUSTIFY)
   @ApiOperation({ summary: 'Convierte una falta/atraso en Licencia (EXCUSED)' })
   async justify(
-    @Param('id') id: string, 
-    @Body('justification') justification: string, 
-    @Req() req: any
+    @Param('id') id: string,
+    @Body('justification') justification: string,
+    @Req() req: any,
   ) {
-    return this.attendanceService.justifyAttendance(id, justification, req.user.userId);
+    return this.attendanceService.justifyAttendance(
+      id,
+      justification,
+      req.user,
+    );
   }
-  
 }

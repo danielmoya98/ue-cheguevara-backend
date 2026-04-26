@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
@@ -23,8 +22,6 @@ export class TimetablesService {
     @InjectQueue('export-queue') private exportQueue: Queue,
   ) {}
 
-
-
   async getPeriods(shift: Shift) {
     return this.prisma.classPeriod.findMany({
       where: { shift },
@@ -42,15 +39,11 @@ export class TimetablesService {
             teacher: { select: { id: true, fullName: true } },
           },
         },
-        // 🔥 TRAEMOS EL ESPACIO FÍSICO
         physicalSpace: { select: { id: true, name: true } },
       },
     });
   }
 
-// =========================================================================
-  // CREACIÓN DE CASILLERO
-  // =========================================================================
   async createSlot(data: CreateScheduleSlotDto) {
     const [assignment, period, institution] = await Promise.all([
       this.prisma.teacherAssignment.findUnique({
@@ -58,45 +51,58 @@ export class TimetablesService {
         include: {
           classroom: true,
           teacher: { select: { fullName: true } },
-          subject: { select: { name: true } }, 
+          subject: { select: { name: true } },
         },
       }),
       this.prisma.classPeriod.findUnique({ where: { id: data.classPeriodId } }),
       this.prisma.institution.findFirst(),
     ]);
 
-    if (!assignment) throw new NotFoundException('Asignación docente no encontrada.');
+    if (!assignment)
+      throw new NotFoundException('Asignación docente no encontrada.');
     if (!period) throw new NotFoundException('Periodo de clase no encontrado.');
-    if (!institution) throw new NotFoundException('Configuración institucional no encontrada.');
+    if (!institution)
+      throw new NotFoundException('Configuración institucional no encontrada.');
 
-    if (data.classroomId !== assignment.classroomId || data.teacherId !== assignment.teacherId) {
-      throw new ConflictException('Inconsistencia de datos: El docente o curso no coinciden con la asignación oficial.');
+    if (
+      data.classroomId !== assignment.classroomId ||
+      data.teacherId !== assignment.teacherId
+    ) {
+      throw new ConflictException(
+        'Inconsistencia de datos: El docente o curso no coinciden con la asignación oficial.',
+      );
     }
 
     if (assignment.classroom.shift !== period.shift) {
       throw new ConflictException(
-        `Incompatibilidad de turno: El curso es del turno ${assignment.classroom.shift}, pero el periodo es de la ${period.shift}.`
+        `Incompatibilidad de turno: El curso es del turno ${assignment.classroom.shift}, pero el periodo es de la ${period.shift}.`,
       );
     }
 
-    // 🛠️ CORRECCIÓN TS 1: Declaramos explícitamente que puede ser null o undefined
     let finalSpaceId: string | null | undefined = data.physicalSpaceId;
     const subjectName = assignment.subject.name.toLowerCase();
-    const isSpecialSubject = subjectName.includes('educación física') || subjectName.includes('educacion fisica');
+    const isSpecialSubject =
+      subjectName.includes('educación física') ||
+      subjectName.includes('educacion fisica');
 
     if (institution.schedulingMode === 'FIXED_BASE') {
       if (!isSpecialSubject) {
         finalSpaceId = assignment.classroom.baseRoomId;
-        
-        if (data.physicalSpaceId && data.physicalSpaceId !== assignment.classroom.baseRoomId) {
+
+        if (
+          data.physicalSpaceId &&
+          data.physicalSpaceId !== assignment.classroom.baseRoomId
+        ) {
           throw new ConflictException(
-            `En el modo 'Aula Fija', la materia de ${assignment.subject.name} no tiene permitido cambiar de espacio físico.`
+            `En el modo 'Aula Fija', la materia de ${assignment.subject.name} no tiene permitido cambiar de espacio físico.`,
           );
         }
       }
     } else if (institution.schedulingMode === 'DYNAMIC') {
       if (!finalSpaceId) {
-        throw new ConflictException('En modo DINÁMICO es estrictamente obligatorio asignar un espacio físico (Aula/Lab).');
+        throw new ConflictException(
+          'En modo DINÁMICO es estrictamente obligatorio asignar un espacio físico (Aula/Lab).',
+        );
       }
     }
 
@@ -111,10 +117,10 @@ export class TimetablesService {
       });
 
       if (spaceConflict) {
-        // 🛠️ CORRECCIÓN TS 2: Optional chaining (?.) y valor por defecto fallback
-        const spaceName = spaceConflict.physicalSpace?.name || 'El espacio seleccionado';
+        const spaceName =
+          spaceConflict.physicalSpace?.name || 'El espacio seleccionado';
         throw new ConflictException(
-          `Choque de Espacio: "${spaceName}" ya está reservado para ${spaceConflict.classroom.grade} "${spaceConflict.classroom.section}".`
+          `Choque de Espacio: "${spaceName}" ya está reservado para ${spaceConflict.classroom.grade} "${spaceConflict.classroom.section}".`,
         );
       }
     }
@@ -130,7 +136,7 @@ export class TimetablesService {
 
     if (teacherConflict) {
       throw new ConflictException(
-        `Choque de Docente: El Prof. ${assignment.teacher.fullName} ya dicta clases en ${teacherConflict.classroom.grade} "${teacherConflict.classroom.section}" a esta hora.`
+        `Choque de Docente: El Prof. ${assignment.teacher.fullName} ya dicta clases en ${teacherConflict.classroom.grade} "${teacherConflict.classroom.section}" a esta hora.`,
       );
     }
 
@@ -147,7 +153,9 @@ export class TimetablesService {
       });
     } catch (error: any) {
       if (error.code === 'P2002') {
-        throw new ConflictException('Este curso ya tiene una materia asignada en este horario específico.');
+        throw new ConflictException(
+          'Este curso ya tiene una materia asignada en este horario específico.',
+        );
       }
       throw error;
     }
@@ -170,7 +178,6 @@ export class TimetablesService {
     const periods = await this.getPeriods(classroom.shift);
     const slots = await this.getClassroomSchedule(classroomId);
 
-    // 🔥 2. Generamos el stream del PDF de forma nativa
     const pdfStream = await renderToStream(
       React.createElement(TimetableTemplate, { classroom, periods, slots }),
     );
@@ -180,7 +187,6 @@ export class TimetablesService {
       'Content-Disposition': `attachment; filename="Horario_${classroom.grade}_${classroom.section}.pdf"`,
     });
 
-    // 3. Enviamos el stream al cliente (Súper eficiente en memoria)
     pdfStream.pipe(res);
   }
 
@@ -205,29 +211,29 @@ export class TimetablesService {
     fileStream.pipe(res);
   }
 
-  // =========================================================================
-  // ACTUALIZACIÓN DE ESPACIO FÍSICO
-  // =========================================================================
   async updateSlotSpace(id: string, physicalSpaceId: string | null) {
     const slot = await this.prisma.scheduleSlot.findUnique({
       where: { id },
       include: {
         teacherAssignment: { include: { subject: true } },
-        classroom: true
-      }
+        classroom: true,
+      },
     });
 
     if (!slot) throw new NotFoundException('Casillero no encontrado');
 
     const institution = await this.prisma.institution.findFirst();
-    if (!institution) throw new NotFoundException('Configuración institucional no encontrada.');
+    if (!institution)
+      throw new NotFoundException('Configuración institucional no encontrada.');
 
     const subjectName = slot.teacherAssignment.subject.name.toLowerCase();
-    const isSpecialSubject = subjectName.includes('educación física') || subjectName.includes('educacion fisica');
+    const isSpecialSubject =
+      subjectName.includes('educación física') ||
+      subjectName.includes('educacion fisica');
 
     if (institution.schedulingMode === 'FIXED_BASE' && !isSpecialSubject) {
       throw new ConflictException(
-        `Acción denegada: En modo 'Aula Fija', no puedes mover la materia de ${slot.teacherAssignment.subject.name} a otro espacio físico.`
+        `Acción denegada: En modo 'Aula Fija', no puedes mover la materia de ${slot.teacherAssignment.subject.name} a otro espacio físico.`,
       );
     }
 
@@ -237,16 +243,16 @@ export class TimetablesService {
           physicalSpaceId: physicalSpaceId,
           dayOfWeek: slot.dayOfWeek,
           classPeriodId: slot.classPeriodId,
-          id: { not: id } 
+          id: { not: id },
         },
-        include: { physicalSpace: true, classroom: true }
+        include: { physicalSpace: true, classroom: true },
       });
 
       if (spaceConflict) {
-        // 🛠️ CORRECCIÓN TS 3: Optional chaining (?.) y valor por defecto fallback
-        const spaceName = spaceConflict.physicalSpace?.name || 'El espacio seleccionado';
+        const spaceName =
+          spaceConflict.physicalSpace?.name || 'El espacio seleccionado';
         throw new ConflictException(
-          `Choque de Espacio: "${spaceName}" ya está reservado para ${spaceConflict.classroom.grade} "${spaceConflict.classroom.section}".`
+          `Choque de Espacio: "${spaceName}" ya está reservado para ${spaceConflict.classroom.grade} "${spaceConflict.classroom.section}".`,
         );
       }
     }

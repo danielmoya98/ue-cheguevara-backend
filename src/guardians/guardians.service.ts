@@ -10,6 +10,7 @@ export class GuardiansService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
+        role: true, // 🔥 IMPORTANTE: Incluimos el rol para no romper el Frontend
         guardian: {
           include: {
             students: {
@@ -48,7 +49,7 @@ export class GuardiansService {
       // Armamos el nombre del curso (Ej: "3ro A" o "Sin Asignar")
       let courseString = 'Sin Asignar';
       if (currentEnrollment && currentEnrollment.classroom) {
-        courseString = `${currentEnrollment.classroom.grade} ${currentEnrollment.classroom.section}`;
+        courseString = `${currentEnrollment.classroom.grade} "${currentEnrollment.classroom.section}"`;
       }
 
       return {
@@ -66,7 +67,8 @@ export class GuardiansService {
       success: true,
       data: {
         id: user.id,
-        role: user.role,
+        // 🔥 CORRECCIÓN: Accedemos al nombre de la tabla relacionada (Si es null por seguridad, mandamos 'PADRE')
+        role: user.role?.name || 'PADRE',
         firstName: user.guardian.names.split(' ')[0], // Solo el primer nombre
         lastName:
           `${user.guardian.lastNamePaterno || ''} ${user.guardian.lastNameMaterno || ''}`.trim(),

@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsOptional, MinLength, IsEnum } from 'class-validator';
-import { Role } from '../../../prisma/generated/client';
+import { IsString, IsOptional, MinLength } from 'class-validator';
+// 🔥 ELIMINADO: import { Role } from '../../../prisma/generated/client';
+// 🔥 ELIMINADO: IsEnum de class-validator
 
 export class UpdateUserDto {
   @ApiProperty({ example: 'Carlos Mendoza', required: false })
@@ -9,8 +10,13 @@ export class UpdateUserDto {
   @MinLength(3)
   fullName?: string;
 
-  @ApiProperty({ enum: Role, required: false })
+  // 🔥 ACTUALIZADO: Ahora espera un String plano en lugar del Enum
+  @ApiProperty({
+    example: 'SECRETARIA',
+    description: 'Nombre exacto del nuevo rol (ej. ADMIN, DOCENTE, SECRETARIA)',
+    required: false,
+  })
   @IsOptional()
-  @IsEnum(Role)
-  role?: Role;
+  @IsString()
+  role?: string;
 }

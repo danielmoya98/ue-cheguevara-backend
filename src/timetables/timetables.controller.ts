@@ -16,21 +16,25 @@ import {
 import { TimetablesService } from './timetables.service';
 import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from '../auth/guards/roles.guard';
-import { Roles } from '../auth/decorators/roles.decorator';
-import { Role, Shift } from '../../prisma/generated/client';
+import { Shift } from '../../prisma/generated/client';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import express from 'express';
 
+// 🔥 IMPORTACIONES RBAC
+import { AuthGuard } from '@nestjs/passport';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermissions } from '../auth/decorators/permissions.decorator';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
+
 @ApiTags('Horarios Escolares')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), RolesGuard)
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 @Controller('timetables')
 export class TimetablesController {
   constructor(private readonly timetablesService: TimetablesService) {}
 
   @Get('periods')
+  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
   @ApiOperation({
     summary: 'Obtiene la estructura base de los periodos según el turno',
   })
@@ -39,6 +43,7 @@ export class TimetablesController {
   }
 
   @Get('classroom/:id')
+  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
   @ApiOperation({
     summary: 'Obtiene todos los casilleros ocupados por un curso',
   })
@@ -47,7 +52,7 @@ export class TimetablesController {
   }
 
   @Post('slot')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.TIMETABLES_WRITE) // 🔥 Solo Admin
   @UseInterceptors(IdempotencyInterceptor)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Asigna una materia a un casillero' })
@@ -56,7 +61,7 @@ export class TimetablesController {
   }
 
   @Delete('slot/:id')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.TIMETABLES_WRITE) // 🔥 Solo Admin
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Libera un casillero' })
   removeSlot(@Param('id') id: string) {
@@ -68,6 +73,7 @@ export class TimetablesController {
   // ==============================================
 
   @Get('export/pdf/:classroomId')
+  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
   @ApiOperation({ summary: 'Descarga el horario de un curso en PDF' })
   exportPdf(
     @Param('classroomId') classroomId: string,
@@ -77,6 +83,7 @@ export class TimetablesController {
   }
 
   @Post('export/zip/start/:academicYearId')
+  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Añade la generación de ZIP a la cola (Asíncrono)' })
   startZipExport(@Param('academicYearId') academicYearId: string) {
@@ -84,6 +91,7 @@ export class TimetablesController {
   }
 
   @Get('export/zip/download/:fileName')
+  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
   @ApiOperation({ summary: 'Descarga un ZIP ya generado por el Worker' })
   downloadZip(
     @Param('fileName') fileName: string,
@@ -93,7 +101,7 @@ export class TimetablesController {
   }
 
   @Patch('slot/:id/space')
-  @Roles(Role.ADMIN)
+  @RequirePermissions(SystemPermissions.TIMETABLES_WRITE) // 🔥 Solo Admin
   @ApiOperation({
     summary: 'Cambia el aula física de una materia específica en el horario',
   })

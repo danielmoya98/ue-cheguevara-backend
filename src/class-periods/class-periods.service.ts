@@ -1,4 +1,8 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateClassPeriodDto } from './dto/create-class-period.dto';
 import { UpdateClassPeriodDto } from './dto/update-class-period.dto';
@@ -11,11 +15,13 @@ export class ClassPeriodsService {
   async create(data: CreateClassPeriodDto) {
     // Validar superposición de orden en el mismo turno
     const existingOrder = await this.prisma.classPeriod.findFirst({
-      where: { shift: data.shift, order: data.order }
+      where: { shift: data.shift, order: data.order },
     });
 
     if (existingOrder) {
-      throw new ConflictException(`Ya existe un periodo con el orden ${data.order} en el turno ${data.shift}.`);
+      throw new ConflictException(
+        `Ya existe un periodo con el orden ${data.order} en el turno ${data.shift}.`,
+      );
     }
 
     return this.prisma.classPeriod.create({ data });
@@ -48,7 +54,7 @@ export class ClassPeriodsService {
     });
     if (linkedSlots > 0) {
       throw new ConflictException(
-        'No puedes eliminar este periodo porque ya hay materias asignadas a él en el Horario Escolar. Debes liberar el horario primero.'
+        'No puedes eliminar este periodo porque ya hay materias asignadas a él en el Horario Escolar. Debes liberar el horario primero.',
       );
     }
 
@@ -58,7 +64,7 @@ export class ClassPeriodsService {
     });
     if (linkedAttendance > 0) {
       throw new ConflictException(
-        'No puedes eliminar este periodo porque existen registros de asistencia de alumnos vinculados a él.'
+        'No puedes eliminar este periodo porque existen registros de asistencia de alumnos vinculados a él.',
       );
     }
 

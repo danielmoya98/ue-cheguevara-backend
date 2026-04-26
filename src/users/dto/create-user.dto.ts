@@ -1,12 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  IsString,
-  IsEmail,
-  IsNotEmpty,
-  IsEnum,
-  MinLength,
-} from 'class-validator';
-import { Role } from '../../../prisma/generated/client';
+import { IsString, IsEmail, IsNotEmpty, MinLength } from 'class-validator';
+// 🔥 ELIMINADO: import { Role } from '../../../prisma/generated/client';
 
 export class CreateUserDto {
   @ApiProperty({
@@ -34,11 +28,13 @@ export class CreateUserDto {
   })
   passwordRaw: string;
 
+  // 🔥 ACTUALIZADO: Ahora espera un String en lugar del viejo Enum de Prisma
   @ApiProperty({
-    enum: Role,
-    example: Role.DOCENTE,
-    description: 'Rol de acceso al sistema',
+    example: 'DOCENTE',
+    description:
+      'Nombre exacto del rol de acceso al sistema (ej. ADMIN, DOCENTE, SECRETARIA)',
   })
-  @IsEnum(Role, { message: 'El rol no es válido' })
-  role: Role;
+  @IsString({ message: 'El rol debe ser un texto' })
+  @IsNotEmpty({ message: 'El rol es obligatorio' })
+  role: string;
 }

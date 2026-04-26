@@ -8,7 +8,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { AcademicStatus, Role, Shift } from '../../prisma/generated/client';
+// 🔥 ELIMINADO Role de la importación
+import { AcademicStatus, Shift } from '../../prisma/generated/client';
 import { CreateBulkClassroomsDto } from './dto/create-bulk-classrooms.dto';
 
 @Injectable()
@@ -27,10 +28,12 @@ export class ClassroomsService {
     }
 
     if (data.advisorId) {
+      // 🔥 NUEVA VALIDACIÓN: Buscamos incluyendo la relación Role
       const teacher = await this.prisma.user.findUnique({
         where: { id: data.advisorId },
+        include: { role: true },
       });
-      if (!teacher || teacher.role !== Role.DOCENTE) {
+      if (!teacher || teacher.role?.name !== 'DOCENTE') {
         throw new BadRequestException(
           'El asesor asignado debe ser un Docente válido',
         );
@@ -42,7 +45,7 @@ export class ClassroomsService {
         data,
         include: {
           advisor: { select: { fullName: true } },
-          baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+          baseRoom: { select: { id: true, name: true } },
         },
       });
     } catch (error: any) {
@@ -90,7 +93,7 @@ export class ClassroomsService {
         include: {
           advisor: { select: { id: true, fullName: true } },
           academicYear: { select: { year: true, status: true } },
-          baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+          baseRoom: { select: { id: true, name: true } },
           _count: {
             select: {
               enrollments: {
@@ -117,7 +120,7 @@ export class ClassroomsService {
       where: { id },
       include: {
         advisor: { select: { id: true, fullName: true } },
-        baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+        baseRoom: { select: { id: true, name: true } },
       },
     });
     if (!classroom) throw new NotFoundException('Curso no encontrado');
@@ -139,7 +142,7 @@ export class ClassroomsService {
       grade: c.grade,
       section: c.section,
       capacity: c.capacity,
-      baseRoomId: c.baseRoomId || null, // 🔥 Añadido aquí
+      baseRoomId: c.baseRoomId || null,
     }));
 
     const result = await this.prisma.classroom.createMany({
@@ -157,10 +160,12 @@ export class ClassroomsService {
     await this.findOne(id);
 
     if (data.advisorId) {
+      // 🔥 NUEVA VALIDACIÓN: Buscamos incluyendo la relación Role
       const teacher = await this.prisma.user.findUnique({
         where: { id: data.advisorId },
+        include: { role: true },
       });
-      if (!teacher || teacher.role !== Role.DOCENTE) {
+      if (!teacher || teacher.role?.name !== 'DOCENTE') {
         throw new BadRequestException(
           'El asesor asignado debe ser un Docente válido',
         );
@@ -173,7 +178,7 @@ export class ClassroomsService {
         data,
         include: {
           advisor: { select: { fullName: true } },
-          baseRoom: { select: { id: true, name: true } }, // 🔥 Añadido
+          baseRoom: { select: { id: true, name: true } },
         },
       });
     } catch (error: any) {
@@ -188,6 +193,9 @@ export class ClassroomsService {
 
   async remove(id: string) {
     await this.findOne(id);
+    // Nota: Como tienes onDelete: Restrict o no definido en cascada para inscripciones,
+    // Prisma lanzará error automático si intentas borrar un curso con alumnos.
+    // Si quieres un mensaje amigable, deberías contar los enrollments antes.
     await this.prisma.classroom.delete({ where: { id } });
     return { message: 'Curso eliminado correctamente' };
   }

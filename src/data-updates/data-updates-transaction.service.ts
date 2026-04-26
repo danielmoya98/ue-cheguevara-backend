@@ -8,7 +8,12 @@ export class DataUpdatesTransactionService {
   // ====================================================================
   // EJECUTOR DE TRANSACCIÓN MAESTRA (Fusión de Datos)
   // ====================================================================
-  async executeApprovalTransaction(requestId: string, studentId: string, enrollmentId: string, data: any) {
+  async executeApprovalTransaction(
+    requestId: string,
+    studentId: string,
+    enrollmentId: string,
+    data: any,
+  ) {
     return await this.prisma.$transaction(async (tx) => {
       // 1. ACTUALIZAMOS AL ESTUDIANTE
       await tx.student.update({
@@ -64,7 +69,9 @@ export class DataUpdatesTransactionService {
           phone: data.phone,
           cellphone: data.cellphone,
           nativeLanguage: data.nativeLanguage,
-          frequentLanguages: data.frequentLanguages ? data.frequentLanguages.split(',').map((s: string) => s.trim()) : [],
+          frequentLanguages: data.frequentLanguages
+            ? data.frequentLanguages.split(',').map((s: string) => s.trim())
+            : [],
           culturalIdentity: data.culturalIdentity,
           nearestHealthCenter: data.nearestHealthCenter,
           healthCareLocations: data.healthCareLocations || [],
@@ -102,7 +109,9 @@ export class DataUpdatesTransactionService {
           phone: data.phone,
           cellphone: data.cellphone,
           nativeLanguage: data.nativeLanguage,
-          frequentLanguages: data.frequentLanguages ? data.frequentLanguages.split(',').map((s: string) => s.trim()) : [],
+          frequentLanguages: data.frequentLanguages
+            ? data.frequentLanguages.split(',').map((s: string) => s.trim())
+            : [],
           culturalIdentity: data.culturalIdentity,
           nearestHealthCenter: data.nearestHealthCenter,
           healthCareLocations: data.healthCareLocations || [],
@@ -132,7 +141,9 @@ export class DataUpdatesTransactionService {
 
       // 3. ACTUALIZAMOS TUTORES
       if (data.guardians && data.guardians.length > 0) {
-        await tx.studentGuardian.deleteMany({ where: { studentId: studentId } });
+        await tx.studentGuardian.deleteMany({
+          where: { studentId: studentId },
+        });
 
         for (const tutor of data.guardians) {
           const guardian = await tx.guardian.upsert({
