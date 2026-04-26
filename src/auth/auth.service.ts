@@ -19,9 +19,7 @@ export class AuthService {
     private jwtService: JwtService,
   ) {}
 
-  // ====================================================================
-  // HELPER: GENERADOR DE CORREOS INSTITUCIONALES AUTOMÁTICOS
-  // ====================================================================
+  // HELPER: Generador de correos
   private generateInstitutionalEmail(
     names: string,
     lastName: string,
@@ -40,26 +38,20 @@ export class AuthService {
           .replace(/[\u0300-\u036f]/g, '')
       : '';
     const ciSuffix = ci ? ci.slice(-3) : '000';
-
-    if (prefix === 'familia') {
-      return `familia.${cleanLastName}.${ciSuffix}@uecg.edu.bo`;
-    }
-    return `${cleanName}.${cleanLastName}.${ciSuffix}@uecg.edu.bo`;
+    return prefix === 'familia'
+      ? `familia.${cleanLastName}.${ciSuffix}@uecg.edu.bo`
+      : `${cleanName}.${cleanLastName}.${ciSuffix}@uecg.edu.bo`;
   }
 
-  // ====================================================================
-  // LOGIN ESTÁNDAR (WEB Y MÓVIL) - ACTUALIZADO RBAC
-  // ====================================================================
+  // LOGIN PRINCIPAL
   async login(email: string, pass: string) {
-    // 1. Join masivo SOLO en el Login para extraer permisos
+    // 🔥 CORRECCIÓN: Consulta relacional limpia
     const user = await this.prisma.user.findUnique({
       where: { email },
       include: {
         role: {
           include: {
-            permissions: {
-              include: { permission: true },
-            },
+            permissions: { include: { permission: true } },
           },
         },
       },
@@ -74,6 +66,7 @@ export class AuthService {
       throw new ForbiddenException('Cuenta desactivada. Contacte a Dirección.');
     }
 
+    // FLUJO DE CAMBIO DE CLAVE
     if (user.requiresPasswordChange) {
       const setupToken = await this.jwtService.signAsync(
         { sub: user.id, type: 'setup_password' },
@@ -86,13 +79,12 @@ export class AuthService {
       };
     }
 
-    // 2. Aplanamos los permisos para el JWT. Formato: "accion:recurso"
+    // Aplanamos permisos para el JWT y el Front
     const userPermissions =
       user.role?.permissions.map(
         (rp) => `${rp.permission.action}:${rp.permission.subject}`,
       ) || [];
 
-    // 3. Payload Blindado
     const payload = {
       sub: user.id,
       email: user.email,
@@ -105,56 +97,39 @@ export class AuthService {
       data: { lastLoginAt: new Date() },
     });
 
+    // ✅ RESPUESTA INTEGRADA CON TU FRONTEND
     return {
       status: 'SUCCESS',
       access_token: await this.jwtService.signAsync(payload),
       user: {
         id: user.id,
         fullName: user.fullName,
-        role: user.role?.name,
+        email: user.email,
+        role: user.role?.name || 'GUEST', // 🔥 String plano para AuthUser
         permissions: userPermissions,
       },
     };
   }
-
-  // ====================================================================
-  // CONFIGURACIÓN DE CONTRASEÑA INICIAL - ACTUALIZADO RBAC
-  // ====================================================================
+  // CONFIGURACIÓN DE CONTRASEÑA (SETUP)
   async setupNewPassword(setupToken: string, newPasswordRaw: string) {
     let userId: string;
-
     try {
       const decoded = await this.jwtService.verifyAsync(setupToken);
-      if (decoded.type !== 'setup_password') {
-        throw new UnauthorizedException(
-          'El token no corresponde a esta operación',
-        );
-      }
+      if (decoded.type !== 'setup_password')
+        throw new UnauthorizedException('Token no válido');
       userId = decoded.sub;
-    } catch (error) {
-      throw new UnauthorizedException(
-        'Token de configuración inválido o expirado',
-      );
+    } catch {
+      throw new UnauthorizedException('Token expirado');
     }
 
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPasswordRaw, salt);
 
-    // Actualizamos al usuario Y traemos sus permisos para firmar el token final
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        password: hashedPassword,
-        requiresPasswordChange: false,
-      },
+      data: { password: hashedPassword, requiresPasswordChange: false },
       include: {
-        role: {
-          include: {
-            permissions: {
-              include: { permission: true },
-            },
-          },
-        },
+        role: { include: { permissions: { include: { permission: true } } } },
       },
     });
 
@@ -174,42 +149,32 @@ export class AuthService {
       status: 'SUCCESS',
       message: 'Contraseña actualizada correctamente',
       access_token: await this.jwtService.signAsync(payload),
+      user: {
+        id: updatedUser.id,
+        fullName: updatedUser.fullName,
+        email: updatedUser.email,
+        role: updatedUser.role?.name,
+      },
     };
   }
-
-  // ====================================================================
-  // REGISTRO APP MÓVIL: PADRES / TUTORES - ACTUALIZADO RBAC
-  // ====================================================================
+  // REGISTRO DE PADRES (APP MÓVIL)
   async registerGuardian(dto: RegisterGuardianDto) {
     const guardian = await this.prisma.guardian.findUnique({
       where: { ci: dto.ci },
     });
-
-    if (!guardian) {
-      throw new NotFoundException(
-        'El Carnet de Identidad no está registrado en el colegio. Por favor, actualice sus datos en Secretaría.',
-      );
-    }
+    if (!guardian)
+      throw new NotFoundException('CI no registrado en el colegio.');
 
     const existingUser = await this.prisma.user.findFirst({
       where: { guardianId: guardian.id },
     });
+    if (existingUser)
+      throw new ConflictException('Ya existe una cuenta para este CI.');
 
-    if (existingUser) {
-      throw new ConflictException(
-        'Ya existe una cuenta asociada a este Carnet de Identidad.',
-      );
-    }
-
-    // 🔥 Buscamos el rol dinámicamente
     const rolePadre = await this.prisma.role.findUnique({
       where: { name: 'PADRE' },
     });
-    if (!rolePadre) {
-      throw new NotFoundException(
-        'Error crítico: El rol PADRE no existe en la base de datos.',
-      );
-    }
+    if (!rolePadre) throw new NotFoundException('Rol PADRE no configurado.');
 
     const institutionalEmail = this.generateInstitutionalEmail(
       guardian.names,
@@ -217,56 +182,31 @@ export class AuthService {
       guardian.ci,
       'familia',
     );
-
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(dto.password, salt);
-    const fullName =
-      `${guardian.names} ${guardian.lastNamePaterno || ''}`.trim();
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const newUser = await this.prisma.user.create({
       data: {
         email: institutionalEmail,
         password: hashedPassword,
-        fullName: fullName,
-        roleId: rolePadre.id, // Asignación relacional
+        fullName: `${guardian.names} ${guardian.lastNamePaterno || ''}`.trim(),
+        roleId: rolePadre.id,
         guardianId: guardian.id,
         recoveryEmail: dto.recoveryEmail,
         requiresPasswordChange: false,
       },
-      include: {
-        role: {
-          include: {
-            permissions: { include: { permission: true } },
-          },
-        },
-      },
     });
-
-    const userPermissions =
-      newUser.role?.permissions.map(
-        (rp) => `${rp.permission.action}:${rp.permission.subject}`,
-      ) || [];
-
-    const payload = {
-      sub: newUser.id,
-      email: newUser.email,
-      roleName: newUser.role?.name,
-      permissions: userPermissions,
-    };
 
     return {
       status: 'SUCCESS',
-      message: `Cuenta creada exitosamente. Su correo de acceso es: ${institutionalEmail}`,
-      access_token: await this.jwtService.signAsync(payload),
+      message: `Cuenta creada: ${institutionalEmail}`,
       user: {
         id: newUser.id,
         fullName: newUser.fullName,
-        role: newUser.role?.name,
+        role: 'PADRE',
         email: newUser.email,
       },
     };
   }
-
   // ====================================================================
   // REGISTRO APP MÓVIL: ESTUDIANTES - ACTUALIZADO RBAC
   // ====================================================================

@@ -10,36 +10,24 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         ExtractJwt.fromAuthHeaderAsBearerToken(),
-        (req: Request) => {
-          let token = null;
-          if (req && req.cookies) {
-            token = req.cookies['uecg_access_token'];
-          }
-          return token;
-        },
+        (req: Request) => req?.cookies?.['uecg_access_token'] || null,
       ]),
       ignoreExpiration: false,
       secretOrKey: process.env.JWT_SECRET || 'super_secreto_uecg_2026',
     });
   }
 
-  // 🔥 ACTUALIZADO: El payload ahora recibe roleName y permissions
-  async validate(payload: {
-    sub: string;
-    email: string;
-    roleName: string;
-    permissions: string[];
-  }) {
-    // Fíjate que aquí YA NO HACEMOS INCLUDE DEL ROL. El Token ya tiene los permisos en texto.
+  async validate(payload: any) {
+    // No hacemos include de roles aquí para optimizar cada request (ABAC/RBAC listo)
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
+      select: { id: true, status: true, email: true },
     });
 
     if (!user || user.status === 'INACTIVE') {
-      throw new UnauthorizedException('Acceso denegado o cuenta inactiva');
+      throw new UnauthorizedException('Acceso denegado');
     }
 
-    // Retornamos el objeto 'req.user' que usarán todos tus controladores
     return {
       userId: payload.sub,
       email: payload.email,
