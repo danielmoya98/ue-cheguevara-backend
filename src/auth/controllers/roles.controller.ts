@@ -16,7 +16,7 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Get()
-  @RequirePermissions(SystemPermissions.MANAGE_ALL) // Solo el Super Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL)
   findAll() {
     return this.rolesService.findAll();
   }
@@ -34,5 +34,19 @@ export class RolesController {
     @Body('permissionIds') permissionIds: string[],
   ) {
     return this.rolesService.updateRolePermissions(id, permissionIds);
+  }
+
+  // 🔥 NUEVO: Crear Rol
+  @Post()
+  @RequirePermissions(SystemPermissions.MANAGE_ALL)
+  createRole(@Body() data: { name: string; description: string }) {
+    return this.rolesService.createRole(data);
+  }
+
+  // 🔥 NUEVO: Eliminar Rol
+  @Delete(':id')
+  @RequirePermissions(SystemPermissions.MANAGE_ALL)
+  deleteRole(@Param('id') id: string) {
+    return this.rolesService.deleteRole(id);
   }
 }
