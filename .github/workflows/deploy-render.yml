@@ -1,16 +1,18 @@
 name: Deploy Backend to Render
 
-# Se ejecutará automáticamente cuando hagas push a estas ramas
 on:
   push:
     branches:
       - staging
-      - main 
+      - main
 
 jobs:
-  # Trabajo 1: Asegurar que el código compila y pasa pruebas
   build-and-test:
     runs-on: ubuntu-latest
+    # 🔥 FIX: Inyectamos una URL falsa para engañar a Prisma durante la compilación
+    env:
+      DATABASE_URL: "postgresql://johndoe:randompassword@localhost:5432/mydb?schema=public"
+
     steps:
       - name: Obtener el código
         uses: actions/checkout@v4
@@ -18,7 +20,7 @@ jobs:
       - name: Configurar entorno Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Asegúrate de que coincida con tu versión
+          node-version: '20'
 
       - name: Instalar dependencias limpias
         run: npm ci
@@ -26,15 +28,9 @@ jobs:
       - name: Verificar compilación de NestJS
         run: npm run build
 
-      # Opcional: Aquí puedes descomentar para correr tus pruebas automatizadas
-      # - name: Ejecutar Tests
-      #   run: npm run test
-
-  # Trabajo 2: Disparar a Render SOLO si el Trabajo 1 fue exitoso
   deploy:
     needs: build-and-test
     runs-on: ubuntu-latest
     steps:
       - name: Llamar al Webhook de Render
-        # Usamos curl para hacer una petición POST oculta a la URL secreta
         run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK }}
