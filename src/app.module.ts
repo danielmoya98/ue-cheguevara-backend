@@ -22,6 +22,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { ClassPeriodsModule } from './class-periods/class-periods.module';
 import { GradesModule } from './grades/grades.module';
 import { TrimestersModule } from './trimesters/trimesters.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { TrimestersModule } from './trimesters/trimesters.module';
     ClassPeriodsModule,
     GradesModule,
     TrimestersModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [AppService],

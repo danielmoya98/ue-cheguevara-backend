@@ -159,6 +159,7 @@ model User {
   // 🔥 CORRECCIÓN: Relación exacta para saber qué profesor tomó la lista
   attendancesMarked AttendanceRecord[] @relation("AttendanceMarker")
   grades            Grade[]
+  auditLogs         AuditLog[]
 
   @@map("users")
 }
@@ -782,4 +783,28 @@ model GradeChangeRequest {
   grade Grade @relation(fields: [gradeId], references: [id])
 
   @@map("grade_change_requests")
+}
+
+// ==========================================
+// MÓDULO DE AUDITORÍA GLOBAL
+// ==========================================
+model AuditLog {
+  id String @id @default(uuid())
+
+  // Quién lo hizo (puede ser null si fue un intento de login fallido de un anónimo)
+  userId String? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Qué hizo
+  method     String // POST, PATCH, DELETE
+  route      String // /api/v1/users/123
+  statusCode Int    @map("status_code") // 200, 201, 403, 500
+
+  // Metadatos de Red
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("audit_logs")
 }
