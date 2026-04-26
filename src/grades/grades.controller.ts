@@ -2,6 +2,8 @@ import {
   Controller,
   Get,
   Put,
+  Post,
+  Patch,
   Body,
   Param,
   UseGuards,
@@ -11,6 +13,8 @@ import {
 } from '@nestjs/common';
 import { GradesService } from './grades.service';
 import { UpsertGradeDto } from './dto/upsert-grade.dto';
+import { CreateChangeRequestDto } from './dto/create-change-request.dto';
+import { ResolveChangeRequestDto } from './dto/resolve-change-request.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
 // 🔥 IMPORTACIONES RBAC
@@ -31,7 +35,6 @@ export class GradesController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ingresa o actualiza la nota de un estudiante' })
   upsertGrade(@Body() upsertGradeDto: UpsertGradeDto, @Req() req: any) {
-    // Pasamos el objeto usuario completo para ejecutar políticas ABAC
     return this.gradesService.upsertGrade(upsertGradeDto, req.user);
   }
 
@@ -45,11 +48,39 @@ export class GradesController {
     @Param('trimesterId') trimesterId: string,
     @Req() req: any,
   ) {
-    // Pasamos el objeto usuario completo para ejecutar políticas ABAC
     return this.gradesService.getGradesByAssignment(
       assignmentId,
       trimesterId,
       req.user,
     );
+  }
+
+  // ==========================================
+  // RUTAS DE DESCONGELAMIENTO (CHANGE REQUESTS)
+  // ==========================================
+
+  @Post('change-requests')
+  @RequirePermissions(SystemPermissions.GRADES_WRITE)
+  @ApiOperation({ summary: 'Profesor solicita corrección de nota en trimestre cerrado' })
+  createChangeRequest(@Body() dto: CreateChangeRequestDto, @Req() req: any) {
+    return this.gradesService.createChangeRequest(dto, req.user);
+  }
+
+  @Get('change-requests/pending')
+  @RequirePermissions(SystemPermissions.GRADES_WRITE) // Para el Director
+  @ApiOperation({ summary: 'Director lista solicitudes pendientes de corrección' })
+  getPendingRequests() {
+    return this.gradesService.getPendingRequests();
+  }
+
+  @Patch('change-requests/:id/resolve')
+  @RequirePermissions(SystemPermissions.GRADES_WRITE) // Para el Director
+  @ApiOperation({ summary: 'Director aprueba o rechaza solicitud de corrección' })
+  resolveChangeRequest(
+    @Param('id') id: string,
+    @Body() dto: ResolveChangeRequestDto,
+    @Req() req: any,
+  ) {
+    return this.gradesService.resolveChangeRequest(id, dto, req.user);
   }
 }
