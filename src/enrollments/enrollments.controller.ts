@@ -17,7 +17,6 @@ import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES RBAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -25,7 +24,7 @@ import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Inscripciones')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
+@UseGuards(AuthGuard('jwt'), PermissionsGuard)
 @Controller('enrollments')
 export class EnrollmentsController {
   constructor(private readonly enrollmentsService: EnrollmentsService) {}
@@ -38,7 +37,7 @@ export class EnrollmentsController {
   }
 
   @Get()
-  @RequirePermissions(SystemPermissions.ENROLLMENTS_READ) // 🔥 Secretaria y Docente
+  @RequirePermissions(SystemPermissions.ENROLLMENTS_READ)
   @ApiOperation({ summary: 'Obtiene el listado de inscripciones' })
   findAll(@Query() query: QueryEnrollmentDto, @Req() req: any) {
     return this.enrollmentsService.findAll(query, req.user);

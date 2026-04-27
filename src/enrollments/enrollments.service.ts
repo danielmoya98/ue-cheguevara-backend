@@ -159,7 +159,7 @@ export class EnrollmentsService {
     });
   }
 
-  // 🔥 BUSCADOR (Actualizado con ABAC)
+  // 🔥 BUSCADOR (Actualizado con ABAC Corregido)
   async findAll(query: QueryEnrollmentDto, user: any) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
@@ -174,9 +174,13 @@ export class EnrollmentsService {
       level,
     } = query;
 
-    // ABAC: Si es Docente, limitamos la búsqueda a sus cursos
+    // 🔥 ABAC: Identificar si es usuario con poder (Admin o Director)
+    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+
     let allowedClassroomIds: string[] | null = null;
-    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+
+    // Si NO es power user, asumimos que es docente y limitamos su alcance
+    if (!isPowerUser) {
       allowedClassroomIds = await this.getTeacherClassroomIds(user.userId);
     }
 
@@ -185,7 +189,6 @@ export class EnrollmentsService {
 
     let classroomFilter: any = undefined;
     if (classroomId) {
-      // Si pidió un curso específico y no es suyo (siendo profe), no devolverá nada
       if (allowedClassroomIds && !allowedClassroomIds.includes(classroomId)) {
         return { data: [], meta: { page, limit, total: 0, totalPages: 0 } };
       }
@@ -196,7 +199,7 @@ export class EnrollmentsService {
         ...(allowedClassroomIds && { id: { in: allowedClassroomIds } }),
       };
     } else if (allowedClassroomIds) {
-      classroomFilter = { id: { in: allowedClassroomIds } }; // Profe viendo lista general
+      classroomFilter = { id: { in: allowedClassroomIds } };
     }
 
     const whereCondition: Prisma.EnrollmentWhereInput = {
@@ -279,7 +282,7 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 DETALLE COMPLETO (Con ABAC)
+  // 🔥 DETALLE COMPLETO (Actualizado con ABAC Corregido)
   async findOne(id: string, user: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
@@ -319,8 +322,9 @@ export class EnrollmentsService {
 
     if (!enrollment) throw new NotFoundException(`Inscripción no encontrada.`);
 
-    // ABAC: Si es profe, verificamos que el alumno esté en su curso
-    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+    // ABAC
+    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    if (!isPowerUser) {
       const allowedClassroomIds = await this.getTeacherClassroomIds(
         user.userId,
       );
@@ -358,7 +362,7 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 KARDEX LIGERO (Con ABAC)
+  // 🔥 KARDEX LIGERO (Actualizado con ABAC Corregido)
   async findKardex(id: string, user: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
@@ -403,7 +407,8 @@ export class EnrollmentsService {
     if (!enrollment) throw new NotFoundException(`Kardex no encontrado.`);
 
     // ABAC
-    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    if (!isPowerUser) {
       const allowedClassroomIds = await this.getTeacherClassroomIds(
         user.userId,
       );
@@ -460,6 +465,6 @@ export class EnrollmentsService {
   }
 
   remove(id: string) {
-    return `This action removes a #${id} enrollment`; // Dejar como TODO según necesidades del colegio
+    return `This action removes a #${id} enrollment`;
   }
 }
