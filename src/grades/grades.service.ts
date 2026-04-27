@@ -7,7 +7,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpsertGradeDto } from './dto/upsert-grade.dto';
 import { CreateChangeRequestDto } from './dto/create-change-request.dto';
 import { ResolveChangeRequestDto } from './dto/resolve-change-request.dto';
-import { SystemPermissions } from '../auth/constants/permissions.constant';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 
@@ -23,8 +22,11 @@ export class GradesService {
   // HELPER: ABAC - VERIFICAR PROPIEDAD DE MATERIA
   // ==========================================
   private verifyAssignmentOwnership(assignment: any, user: any) {
-    if (user.permissions.includes(SystemPermissions.MANAGE_ALL)) return;
+    // 🔥 ABAC CORREGIDO: Administradores y Directores tienen acceso global a auditoría
+    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    if (isPowerUser) return;
 
+    // Si no es Power User, entonces debe ser estrictamente el Docente dueño de la materia
     if (assignment.teacherId !== user.userId) {
       throw new ForbiddenException(
         'Privacidad: No tienes permiso para ver o alterar las calificaciones de una materia que no dictas.',
@@ -75,11 +77,26 @@ export class GradesService {
     });
 
     // 5. MOTOR MATEMÁTICO: Calcular el Total
-    const currentSer = data.scoreSer !== undefined ? data.scoreSer : existingGrade?.scoreSer ?? null;
-    const currentSaber = data.scoreSaber !== undefined ? data.scoreSaber : existingGrade?.scoreSaber ?? null;
-    const currentHacer = data.scoreHacer !== undefined ? data.scoreHacer : existingGrade?.scoreHacer ?? null;
-    const currentAuto = data.scoreAuto !== undefined ? data.scoreAuto : existingGrade?.scoreAuto ?? null;
-    let currentRecovery = data.recoveryScore !== undefined ? data.recoveryScore : existingGrade?.recoveryScore ?? null;
+    const currentSer =
+      data.scoreSer !== undefined
+        ? data.scoreSer
+        : (existingGrade?.scoreSer ?? null);
+    const currentSaber =
+      data.scoreSaber !== undefined
+        ? data.scoreSaber
+        : (existingGrade?.scoreSaber ?? null);
+    const currentHacer =
+      data.scoreHacer !== undefined
+        ? data.scoreHacer
+        : (existingGrade?.scoreHacer ?? null);
+    const currentAuto =
+      data.scoreAuto !== undefined
+        ? data.scoreAuto
+        : (existingGrade?.scoreAuto ?? null);
+    let currentRecovery =
+      data.recoveryScore !== undefined
+        ? data.recoveryScore
+        : (existingGrade?.recoveryScore ?? null);
 
     let totalScore: number | null = null;
     let finalScore: number | null = null;
@@ -178,6 +195,7 @@ export class GradesService {
 
     if (!assignment) throw new NotFoundException('Asignación no encontrada');
 
+    // 🔥 Pasa por la validación ABAC actualizada (El Director ahora sí pasa este filtro)
     this.verifyAssignmentOwnership(assignment, user);
 
     const enrollments = await this.prisma.enrollment.findMany({
@@ -223,8 +241,9 @@ export class GradesService {
       include: { teacherAssignment: true },
     });
 
-    if (!grade) throw new NotFoundException('Calificación original no encontrada');
-    
+    if (!grade)
+      throw new NotFoundException('Calificación original no encontrada');
+
     // Verificamos que el profesor que pide el cambio sea el dueño de la materia
     this.verifyAssignmentOwnership(grade.teacherAssignment, user);
 
@@ -260,14 +279,19 @@ export class GradesService {
   }
 
   // 3. El Director aprueba o rechaza
-  async resolveChangeRequest(requestId: string, data: ResolveChangeRequestDto, user: any) {
+  async resolveChangeRequest(
+    requestId: string,
+    data: ResolveChangeRequestDto,
+    user: any,
+  ) {
     const request = await this.prisma.gradeChangeRequest.findUnique({
       where: { id: requestId },
       include: { grade: true },
     });
 
     if (!request) throw new NotFoundException('Solicitud no encontrada');
-    if (request.status !== 'PENDING') throw new ForbiddenException('Esta solicitud ya fue resuelta');
+    if (request.status !== 'PENDING')
+      throw new ForbiddenException('Esta solicitud ya fue resuelta');
 
     return await this.prisma.$transaction(async (tx) => {
       // 1. Marcamos la solicitud como resuelta
@@ -283,14 +307,15 @@ export class GradesService {
       // 2. Si el Director APRUEBA, aplicamos los cambios en la nota real
       if (data.status === 'APPROVED') {
         const { grade } = request;
-        
+
         const newSer = request.proposedSer ?? grade.scoreSer;
         const newSaber = request.proposedSaber ?? grade.scoreSaber;
         const newHacer = request.proposedHacer ?? grade.scoreHacer;
         const newAuto = request.proposedAuto ?? grade.scoreAuto;
 
-        const totalScore = (newSer || 0) + (newSaber || 0) + (newHacer || 0) + (newAuto || 0);
-        
+        const totalScore =
+          (newSer || 0) + (newSaber || 0) + (newHacer || 0) + (newAuto || 0);
+
         let finalScore = totalScore;
         let recoveryScore = grade.recoveryScore;
 

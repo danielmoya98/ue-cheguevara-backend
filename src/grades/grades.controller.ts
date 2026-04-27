@@ -61,21 +61,27 @@ export class GradesController {
 
   @Post('change-requests')
   @RequirePermissions(SystemPermissions.GRADES_WRITE)
-  @ApiOperation({ summary: 'Profesor solicita corrección de nota en trimestre cerrado' })
+  @ApiOperation({
+    summary: 'Profesor solicita corrección de nota en trimestre cerrado',
+  })
   createChangeRequest(@Body() dto: CreateChangeRequestDto, @Req() req: any) {
     return this.gradesService.createChangeRequest(dto, req.user);
   }
 
   @Get('change-requests/pending')
   @RequirePermissions(SystemPermissions.GRADES_WRITE) // Para el Director
-  @ApiOperation({ summary: 'Director lista solicitudes pendientes de corrección' })
+  @ApiOperation({
+    summary: 'Director lista solicitudes pendientes de corrección',
+  })
   getPendingRequests() {
     return this.gradesService.getPendingRequests();
   }
 
   @Patch('change-requests/:id/resolve')
   @RequirePermissions(SystemPermissions.GRADES_WRITE) // Para el Director
-  @ApiOperation({ summary: 'Director aprueba o rechaza solicitud de corrección' })
+  @ApiOperation({
+    summary: 'Director aprueba o rechaza solicitud de corrección',
+  })
   resolveChangeRequest(
     @Param('id') id: string,
     @Body() dto: ResolveChangeRequestDto,
