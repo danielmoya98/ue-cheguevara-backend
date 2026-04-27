@@ -94,15 +94,21 @@ export class TeacherAssignmentsService {
 
     let { academicYearId, classroomId, teacherId } = query;
 
-    // 🔥 ABAC: Si es un Docente, forzamos que solo vea SU propia carga horaria
-    if (!user.permissions.includes(SystemPermissions.MANAGE_ALL)) {
+    // 🔥 REGLA ABAC CORREGIDA:
+    // Solo forzamos el filtro de teacherId si el usuario NO es Admin ni Director.
+    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+
+    if (!isPowerUser) {
+      // Si llega aquí, es un DOCENTE, por lo tanto solo ve su propia carga
       teacherId = user.userId;
     }
 
     const whereCondition: any = {
-      ...(classroomId && { classroomId }),
-      ...(teacherId && { teacherId }),
-      ...(academicYearId && { classroom: { academicYearId } }),
+      AND: [
+        classroomId ? { classroomId } : {},
+        teacherId ? { teacherId } : {},
+        academicYearId ? { classroom: { academicYearId } } : {},
+      ],
     };
 
     const [total, data] = await Promise.all([
@@ -138,7 +144,6 @@ export class TeacherAssignmentsService {
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
-
   async remove(id: string) {
     const assignment = await this.prisma.teacherAssignment.findUnique({
       where: { id },
