@@ -8,13 +8,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { RolesController } from './controllers/roles.controller';
 import { RolesService } from './services/roles.service';
 import { PermissionsSyncService } from './services/permissions-sync.service';
+import { EncryptionService } from '../common/services/encryption.service'; // Ajusta la ruta
 
 @Module({
   imports: [
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'super_secreto_uecg_2026', // En producción, usa un .env fuerte
-      signOptions: { expiresIn: '8h' }, // La sesión dura un turno laboral (8 horas)
+      secret: process.env.JWT_SECRET || 'super_secreto_uecg_2026',
     }),
   ],
   controllers: [AuthController, RolesController],
@@ -24,6 +24,7 @@ import { PermissionsSyncService } from './services/permissions-sync.service';
     JwtStrategy,
     RolesService,
     PermissionsSyncService,
+    EncryptionService,
   ],
 })
 export class AuthModule {}

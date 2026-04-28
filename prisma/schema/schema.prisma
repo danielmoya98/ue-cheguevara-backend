@@ -119,12 +119,12 @@ model User {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  // --- NUEVOS CAMPOS DE PERFIL ---
-  ci        String? // Carnet de Identidad
-  phone     String? // Teléfono
-  address   String? // Dirección
-  specialty String? // Especialidad (Ej. Matemáticas)
-
+  // 🔥 FASE 2: ENCRIPTACIÓN Y BÚSQUEDA
+  ci        String? // Guardará el dato encriptado (AES-GCM)
+  ciHash    String? @unique @map("ci_hash") // Guardará el Hash (SHA-256) para búsquedas
+  phone     String? // Guardará el dato encriptado
+  address   String? // Guardará el dato encriptado
+  specialty String?
   // ==========================================
   // RELACIONES CON INSTITUCIÓN
   // ==========================================
@@ -160,6 +160,11 @@ model User {
   attendancesMarked AttendanceRecord[] @relation("AttendanceMarker")
   grades            Grade[]
   auditLogs         AuditLog[]
+
+  // Dentro de tu model User { ... }
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockoutUntil        DateTime? @map("lockout_until")
+  hashedRefreshToken  String?   @map("hashed_refresh_token")
 
   @@map("users")
 }
@@ -389,11 +394,12 @@ model Student {
   rudeCode String? @unique
 
   // Identificación
-  documentType String  @default("CI")
-  ci           String? @unique
-  complement   String?
-  expedition   String?
-
+  documentType    String  @default("CI")
+  complement      String?
+  expedition      String?
+  // 🔥 FASE 2: ENCRIPTACIÓN Y BÚSQUEDA
+  ci              String? // Encriptado (ya NO es @unique)
+  ciHash          String? @unique @map("ci_hash") // El Hash para validación de duplicados
   // Nombres
   lastNamePaterno String?
   lastNameMaterno String?
@@ -482,7 +488,6 @@ model Enrollment {
 // 3. PADRES Y TUTORES
 model Guardian {
   id              String    @id @default(uuid())
-  ci              String?   @unique
   complement      String?
   expedition      String?
   lastNamePaterno String?
@@ -495,6 +500,8 @@ model Guardian {
   birthDate       DateTime?
   jobTitle        String?
   institution     String?
+  ci              String? // Encriptado (ya NO es @unique)
+  ciHash          String?   @unique @map("ci_hash") // El Hash para búsquedas
 
   students StudentGuardian[]
   user     User?
