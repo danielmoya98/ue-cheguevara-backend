@@ -14,7 +14,6 @@ import {
   AttendanceMethod,
   NotificationFrequency,
 } from '../../prisma/generated/client';
-// 🔥 IMPORTAMOS EL SERVICIO DE FIREBASE Y PERMISOS
 import { FirebaseService } from '../firebase/firebase.service';
 
 @Injectable()
@@ -39,7 +38,7 @@ export class AttendanceService {
     });
     if (!activeTrimester) {
       throw new BadRequestException(
-        'El sistema de asistencia está bloqueado. No hay ningún trimestre abierto actualmente (Posibles vacaciones o fin de gestión).',
+        'El sistema de asistencia está bloqueado. No hay ningún trimestre abierto actualmente.',
       );
     }
     return activeTrimester;
@@ -49,11 +48,9 @@ export class AttendanceService {
   // HELPER: ABAC - VERIFICAR PROPIEDAD DEL CURSO
   // ==========================================
   private async verifyTeacherClassroomAccess(user: any, classroomId: string) {
-    // 🔥 CAMBIO: Si es Admin o Director, tiene acceso total a todos los cursos
     const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
     if (isPowerUser) return;
 
-    // Si es docente, verificamos que dicte alguna materia en este curso
     const isAssigned = await this.prisma.teacherAssignment.findFirst({
       where: { classroomId: classroomId, teacherId: user.userId },
     });
@@ -66,13 +63,133 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // REGISTRO QR
+  // 👨‍🏫 RUTAS DEL DOCENTE (Nuevas funciones)
   // ==========================================
+
+  // ==========================================
+  // 👨‍🏫 RUTAS DEL DOCENTE (Corregido para tu Schema)
+  // ==========================================
+
+  async getDailySchedule(date: string, user: any) {
+    const targetDate = new Date(date);
+
+    const dayOfWeek = targetDate.getUTCDay();
+
+    // 🔥 Usamos scheduleSlot en lugar de timetable
+    return this.prisma.scheduleSlot.findMany({
+      where: {
+        dayOfWeek: dayOfWeek,
+        teacherAssignment: { teacherId: user.userId },
+      },
+      include: {
+        classPeriod: true,
+        classroom: true,
+        teacherAssignment: { include: { subject: true } },
+        physicalSpace: true, // Opcional, pero útil si quieres saber en qué aula física les toca
+      },
+      orderBy: { classPeriod: { startTime: 'asc' } },
+    });
+  }
+  async getClassroomAttendance(
+    classroomId: string,
+    classPeriodId: string,
+    date: string,
+    user: any,
+  ) {
+    await this.verifyTeacherClassroomAccess(user, classroomId);
+
+    const targetDate = new Date(date);
+    const dateOnly = new Date(targetDate.toISOString().split('T')[0]);
+
+    // 1. Traer a todos los inscritos del curso
+    const enrollments = await this.prisma.enrollment.findMany({
+      where: { classroomId, status: 'INSCRITO' },
+      include: { student: true },
+      orderBy: [
+        { student: { lastNamePaterno: 'asc' } },
+        { student: { names: 'asc' } },
+      ],
+    });
+
+    // 2. Traer los registros de asistencia que ya existan para hoy en esa hora
+    const records = await this.prisma.attendanceRecord.findMany({
+      where: {
+        classPeriodId,
+        date: dateOnly,
+        enrollmentId: { in: enrollments.map((e) => e.id) },
+      },
+    });
+
+    // 3. Fusionar datos
+    return enrollments.map((enrollment) => {
+      const record = records.find((r) => r.enrollmentId === enrollment.id);
+      return {
+        enrollmentId: enrollment.id,
+        student: enrollment.student,
+        record: record || null, // Nulo si aún no han marcado
+      };
+    });
+  }
+
+  async saveBulkAttendance(bulkData: any, user: any) {
+    await this.ensureActiveTrimesterExists();
+    await this.verifyTeacherClassroomAccess(user, bulkData.classroomId);
+
+    const targetDate = new Date(bulkData.date);
+    const dateOnly = new Date(targetDate.toISOString().split('T')[0]);
+    const now = new Date();
+
+    const institution = await this.prisma.institution.findFirst();
+    if (!institution)
+      throw new InternalServerErrorException('Reglas no configuradas');
+
+    // Ejecutamos todos los upserts en una sola transacción SQL
+    const results = await this.prisma.$transaction(
+      bulkData.records.map((record: any) =>
+        this.prisma.attendanceRecord.upsert({
+          where: {
+            enrollmentId_classPeriodId_date: {
+              enrollmentId: record.enrollmentId,
+              classPeriodId: bulkData.classPeriodId,
+              date: dateOnly,
+            },
+          },
+          update: {
+            status: record.status,
+            method: AttendanceMethod.MANUAL,
+            markedById: user.userId,
+            timestamp: now,
+          },
+          create: {
+            enrollmentId: record.enrollmentId,
+            classPeriodId: bulkData.classPeriodId,
+            date: dateOnly,
+            status: record.status,
+            method: AttendanceMethod.MANUAL,
+            markedById: user.userId,
+            timestamp: now,
+          },
+        }),
+      ),
+    );
+
+    // Disparamos notificaciones Push asíncronas para cada registro
+    bulkData.records.forEach((record: any) => {
+      this.processSmartNotification(
+        record.enrollmentId,
+        record.status,
+        now,
+        institution,
+      ).catch((e) => this.logger.error('Error enviando Push masivo', e));
+    });
+
+    return { message: 'Asistencia guardada con éxito', count: results.length };
+  }
+
   // ==========================================
   // REGISTRO QR
   // ==========================================
   async registerScan(dto: RegisterAttendanceDto, user: any) {
-    // 1. Bloqueo de vacaciones
     await this.ensureActiveTrimesterExists();
 
     const institution = await this.prisma.institution.findFirst();
@@ -81,7 +198,6 @@ export class AttendanceService {
         'Reglas de institución no configuradas.',
       );
 
-    // 🔥 CAMBIO: Validar si Dirección activó el QR
     if (
       !institution.enableQrAttendance &&
       (!dto.method || dto.method === AttendanceMethod.QR)
@@ -91,10 +207,8 @@ export class AttendanceService {
       );
     }
 
-    // 2. Validar el QR y extraer el ID del estudiante
     const studentId = await this.identityService.validateQrToken(dto.qrToken);
 
-    // 3. Buscar la inscripción activa
     const enrollment = await this.prisma.enrollment.findFirst({
       where: {
         studentId,
@@ -109,10 +223,8 @@ export class AttendanceService {
         'El estudiante no tiene una inscripción activa.',
       );
 
-    // 🔥 CAMBIO: ABAC para bloquear el escaneo si el profe no dicta en ese curso
     await this.verifyTeacherClassroomAccess(user, enrollment.classroomId);
 
-    // 4. Obtener Periodo y Reglas
     const classPeriod = await this.prisma.classPeriod.findUnique({
       where: { id: dto.classPeriodId },
     });
@@ -128,7 +240,6 @@ export class AttendanceService {
     const now = new Date();
     const dateOnly = new Date(now.toISOString().split('T')[0]);
 
-    // 5. Guardar en Base de Datos
     try {
       await this.prisma.attendanceRecord.create({
         data: {
@@ -138,11 +249,10 @@ export class AttendanceService {
           status: status,
           method: dto.method || AttendanceMethod.QR,
           timestamp: now,
-          markedById: user.userId, // 🔥 Obtenido del JWT
+          markedById: user.userId,
         },
       });
 
-      // 6. Notificación Push Asíncrona
       this.processSmartNotification(
         enrollment.id,
         status,
@@ -171,9 +281,7 @@ export class AttendanceService {
       'Asistencia Exitosa',
     );
   }
-  // ==========================================
-  // 🔥 MONITOR EN VIVO (Admin y Docentes)
-  // ==========================================
+
   // ==========================================
   // 🔥 MONITOR EN VIVO (Admin y Docentes)
   // ==========================================
@@ -181,7 +289,6 @@ export class AttendanceService {
     dto: { classroomId: string; classPeriodId: string; date?: string },
     user: any,
   ) {
-    // 🔥 CAMBIO: Verifica que el profesor sea dueño del curso que intenta mirar (O pase libre si es Director)
     await this.verifyTeacherClassroomAccess(user, dto.classroomId);
 
     const targetDate = dto.date ? new Date(dto.date) : new Date();
@@ -251,7 +358,6 @@ export class AttendanceService {
     dto: import('./dto/manual-attendance.dto').ManualAttendanceDto,
     user: any,
   ) {
-    // 1. Bloqueo de vacaciones
     await this.ensureActiveTrimesterExists();
 
     const enrollment = await this.prisma.enrollment.findUnique({
@@ -259,7 +365,6 @@ export class AttendanceService {
     });
     if (!enrollment) throw new NotFoundException('Inscripción no encontrada');
 
-    // 🔥 CAMBIO: Verifica que el profesor dicte clases en el curso de este alumno
     await this.verifyTeacherClassroomAccess(user, enrollment.classroomId);
 
     const now = new Date();
@@ -282,7 +387,7 @@ export class AttendanceService {
       update: {
         status: dto.status,
         method: AttendanceMethod.MANUAL,
-        markedById: user.userId, // 🔥 JWT
+        markedById: user.userId,
         timestamp: now,
       },
       create: {
@@ -291,7 +396,7 @@ export class AttendanceService {
         date: dateOnly,
         status: dto.status,
         method: AttendanceMethod.MANUAL,
-        markedById: user.userId, // 🔥 JWT
+        markedById: user.userId,
         timestamp: now,
       },
     });
@@ -312,8 +417,6 @@ export class AttendanceService {
   // 🏥 MÓDULO DE LICENCIAS Y JUSTIFICACIONES
   // ==========================================
   async getStudentAttendanceHistory(enrollmentId: string, user: any) {
-    // Nota: Podrías inyectar ABAC aquí para que el docente solo vea historial de sus alumnos,
-    // pero el historial suele ser de lectura amplia.
     return this.prisma.attendanceRecord.findMany({
       where: {
         enrollmentId,
@@ -338,7 +441,7 @@ export class AttendanceService {
       data: {
         status: AttendanceStatus.EXCUSED,
         justification: justification,
-        markedById: user.userId, // 🔥 JWT
+        markedById: user.userId,
         method: AttendanceMethod.MANUAL,
         updatedAt: new Date(),
       },
@@ -367,7 +470,7 @@ export class AttendanceService {
       update: {
         status: AttendanceStatus.EXCUSED,
         justification: dto.reason,
-        markedById: user.userId, // 🔥 JWT
+        markedById: user.userId,
       },
       create: {
         enrollmentId: dto.enrollmentId,
@@ -375,14 +478,14 @@ export class AttendanceService {
         date: dateOnly,
         status: AttendanceStatus.EXCUSED,
         justification: dto.reason,
-        markedById: user.userId, // 🔥 JWT
+        markedById: user.userId,
         method: AttendanceMethod.MANUAL,
       },
     });
   }
 
   // ==========================================
-  // MÉTODOS PRIVADOS DE AYUDA (Sin Cambios)
+  // MÉTODOS PRIVADOS DE AYUDA
   // ==========================================
   private calculateAttendanceStatus(
     startTimeStr: string,
@@ -432,7 +535,6 @@ export class AttendanceService {
   ) {
     let shouldNotify = false;
 
-    // 1. EVALUAR LA REGLA DE LA DIRECTORA
     switch (institution.notificationFrequency) {
       case NotificationFrequency.PER_CLASS:
         shouldNotify = true;
@@ -460,7 +562,6 @@ export class AttendanceService {
 
     if (!shouldNotify) return;
 
-    // 2. BUSCAR LOS TOKENS DEL PADRE
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id: enrollmentId },
       include: {
@@ -486,7 +587,6 @@ export class AttendanceService {
     const tokensArray = Array.from(fcmTokens);
     if (tokensArray.length === 0) return;
 
-    // 3. ARMAR EL MENSAJE DINÁMICO
     const firstName = enrollment.student.names.split(' ')[0];
     const timeStr = scanTime.toLocaleTimeString('es-BO', {
       hour: '2-digit',
@@ -504,7 +604,6 @@ export class AttendanceService {
       body = `${firstName} ha sido marcado como Ausente a las ${timeStr}.`;
     }
 
-    // 4. DISPARAR A FIREBASE
     await this.firebaseService.sendMulticastNotification(
       tokensArray,
       title,
