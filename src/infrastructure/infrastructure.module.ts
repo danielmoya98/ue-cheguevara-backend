@@ -18,13 +18,23 @@ import { FirebaseModule } from '../firebase/firebase.module';
       isGlobal: true,
       useFactory: async () => ({
         store: await redisStore({
-          url: process.env.REDIS_URL || 'redis://localhost:6379',
+          socket: {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379', 10),
+          },
+          password: process.env.REDIS_PASSWORD || undefined,
           ttl: 60000,
         }),
       }),
     }),
+    // 🔥 2. Configuración de BullMQ (Colas) con Redis Cloud
     BullModule.forRoot({
-      connection: { url: process.env.REDIS_URL || 'redis://localhost:6379' },
+      connection: {
+        host: process.env.REDIS_HOST || 'localhost',
+        port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        password: process.env.REDIS_PASSWORD || undefined,
+        // Al omitir 'tls', forzamos una conexión estándar que es la que pide Redis Cloud Free
+      },
     }),
   ],
   exports: [PrismaModule, FirebaseModule, CacheModule, BullModule],
