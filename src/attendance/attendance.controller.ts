@@ -30,6 +30,46 @@ import { SystemPermissions } from '../auth/constants/permissions.constant';
 export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
+  // ==========================================
+  // 👨‍🏫 RUTAS DEL DOCENTE (Nuevas)
+  // ==========================================
+
+  @Get('schedule')
+  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @ApiOperation({ summary: 'Obtiene el horario del día para tomar asistencia' })
+  async getDailySchedule(@Query('date') date: string, @Req() req: any) {
+    return this.attendanceService.getDailySchedule(date, req.user);
+  }
+
+  @Get('classroom')
+  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @ApiOperation({ summary: 'Obtiene alumnos y estado actual de asistencia' })
+  async getClassroomAttendance(
+    @Query('classroomId') classroomId: string,
+    @Query('classPeriodId') classPeriodId: string,
+    @Query('date') date: string,
+    @Req() req: any,
+  ) {
+    return this.attendanceService.getClassroomAttendance(
+      classroomId,
+      classPeriodId,
+      date,
+      req.user,
+    );
+  }
+
+  @Post('bulk')
+  @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Guarda la asistencia masiva de un curso' })
+  async saveBulkAttendance(@Body() bulkData: any, @Req() req: any) {
+    return this.attendanceService.saveBulkAttendance(bulkData, req.user);
+  }
+
+  // ==========================================
+  // 🛡️ RUTAS DEL DIRECTOR / SECRETARÍA (Intactas)
+  // ==========================================
+
   @Post('scan')
   @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
   @HttpCode(HttpStatus.OK)
