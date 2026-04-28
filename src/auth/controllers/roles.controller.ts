@@ -43,6 +43,11 @@ export class RolesController {
     return this.rolesService.createRole(data);
   }
 
+  @Post('seed')
+  async seedPermissions() {
+    return this.rolesService.seedMasterPermissions();
+  }
+
   // 🔥 NUEVO: Eliminar Rol
   @Delete(':id')
   @RequirePermissions(SystemPermissions.MANAGE_ALL)
