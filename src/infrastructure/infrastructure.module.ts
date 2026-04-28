@@ -27,7 +27,6 @@ import { FirebaseModule } from '../firebase/firebase.module';
         }),
       }),
     }),
-    // 🔥 2. Configuración de BullMQ (Colas) con Redis Cloud
     BullModule.forRoot({
       connection: {
         host: process.env.REDIS_HOST || 'localhost',
