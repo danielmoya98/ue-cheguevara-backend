@@ -16,7 +16,6 @@ import {
 } from '../../prisma/generated/client';
 // 🔥 IMPORTAMOS EL SERVICIO DE FIREBASE Y PERMISOS
 import { FirebaseService } from '../firebase/firebase.service';
-import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @Injectable()
 export class AttendanceService {
@@ -50,8 +49,9 @@ export class AttendanceService {
   // HELPER: ABAC - VERIFICAR PROPIEDAD DEL CURSO
   // ==========================================
   private async verifyTeacherClassroomAccess(user: any, classroomId: string) {
-    // Si tiene el permiso supremo, pasa libre (Director/Admin)
-    if (user.permissions.includes(SystemPermissions.MANAGE_ALL)) return;
+    // 🔥 CAMBIO: Si es Admin o Director, tiene acceso total a todos los cursos
+    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    if (isPowerUser) return;
 
     // Si es docente, verificamos que dicte alguna materia en este curso
     const isAssigned = await this.prisma.teacherAssignment.findFirst({
@@ -60,7 +60,7 @@ export class AttendanceService {
 
     if (!isAssigned) {
       throw new ForbiddenException(
-        'No tienes carga horaria asignada a este curso. Acceso denegado.',
+        'Privacidad: No tienes carga horaria asignada a este curso. Acceso denegado.',
       );
     }
   }
@@ -68,9 +68,28 @@ export class AttendanceService {
   // ==========================================
   // REGISTRO QR
   // ==========================================
+  // ==========================================
+  // REGISTRO QR
+  // ==========================================
   async registerScan(dto: RegisterAttendanceDto, user: any) {
     // 1. Bloqueo de vacaciones
     await this.ensureActiveTrimesterExists();
+
+    const institution = await this.prisma.institution.findFirst();
+    if (!institution)
+      throw new InternalServerErrorException(
+        'Reglas de institución no configuradas.',
+      );
+
+    // 🔥 CAMBIO: Validar si Dirección activó el QR
+    if (
+      !institution.enableQrAttendance &&
+      (!dto.method || dto.method === AttendanceMethod.QR)
+    ) {
+      throw new ForbiddenException(
+        'El marcado de asistencia por código QR está deshabilitado por Dirección.',
+      );
+    }
 
     // 2. Validar el QR y extraer el ID del estudiante
     const studentId = await this.identityService.validateQrToken(dto.qrToken);
@@ -90,23 +109,15 @@ export class AttendanceService {
         'El estudiante no tiene una inscripción activa.',
       );
 
-    // 🔥 ABAC Opcional: Podrías bloquear el escaneo si el profe no es del curso.
-    // Usualmente en colegios cualquier profe puede escanear un QR en la puerta,
-    // pero si quieres ser estricto, descomenta la siguiente línea:
-    // await this.verifyTeacherClassroomAccess(user, enrollment.classroomId);
+    // 🔥 CAMBIO: ABAC para bloquear el escaneo si el profe no dicta en ese curso
+    await this.verifyTeacherClassroomAccess(user, enrollment.classroomId);
 
     // 4. Obtener Periodo y Reglas
-    const [classPeriod, institution] = await Promise.all([
-      this.prisma.classPeriod.findUnique({ where: { id: dto.classPeriodId } }),
-      this.prisma.institution.findFirst(),
-    ]);
-
+    const classPeriod = await this.prisma.classPeriod.findUnique({
+      where: { id: dto.classPeriodId },
+    });
     if (!classPeriod)
       throw new NotFoundException('Periodo de clase no encontrado.');
-    if (!institution)
-      throw new InternalServerErrorException(
-        'Reglas de institución no configuradas.',
-      );
 
     const status = this.calculateAttendanceStatus(
       classPeriod.startTime,
@@ -140,7 +151,7 @@ export class AttendanceService {
       ).catch((e) =>
         this.logger.error('Error enviando Push de asistencia QR', e),
       );
-    } catch (error) {
+    } catch (error: any) {
       if (error.code === 'P2002') {
         this.logger.warn(
           `Escaneo duplicado ignorado para ${enrollment.student.names}`,
@@ -160,7 +171,9 @@ export class AttendanceService {
       'Asistencia Exitosa',
     );
   }
-
+  // ==========================================
+  // 🔥 MONITOR EN VIVO (Admin y Docentes)
+  // ==========================================
   // ==========================================
   // 🔥 MONITOR EN VIVO (Admin y Docentes)
   // ==========================================
@@ -168,7 +181,7 @@ export class AttendanceService {
     dto: { classroomId: string; classPeriodId: string; date?: string },
     user: any,
   ) {
-    // 🔥 ABAC: Verifica que el profesor sea dueño del curso que intenta mirar
+    // 🔥 CAMBIO: Verifica que el profesor sea dueño del curso que intenta mirar (O pase libre si es Director)
     await this.verifyTeacherClassroomAccess(user, dto.classroomId);
 
     const targetDate = dto.date ? new Date(dto.date) : new Date();
@@ -246,7 +259,7 @@ export class AttendanceService {
     });
     if (!enrollment) throw new NotFoundException('Inscripción no encontrada');
 
-    // 🔥 ABAC: Verifica que el profesor dicte clases en el curso de este alumno
+    // 🔥 CAMBIO: Verifica que el profesor dicte clases en el curso de este alumno
     await this.verifyTeacherClassroomAccess(user, enrollment.classroomId);
 
     const now = new Date();
