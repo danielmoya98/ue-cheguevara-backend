@@ -7,14 +7,18 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateFullRudeDto } from './dto/create-student.dto';
 import { EnrollmentStatus } from '../../prisma/generated/client';
 import * as xlsx from 'xlsx';
+import { EncryptionService } from '../common/services/encryption.service'; // 🔥 IMPORTADO
 
 @Injectable()
 export class StudentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private encryptionService: EncryptionService, // 🔥 INYECTADO
+  ) {}
 
   async registerFullRude(data: CreateFullRudeDto) {
     return await this.prisma.$transaction(async (tx) => {
-      // 1. VALIDACIÓN DE CUPOS DEL CURSO (Ajustado para liberar cupos de retirados/rechazados)
+      // 1. VALIDACIÓN DE CUPOS DEL CURSO
       const classroom = await tx.classroom.findUnique({
         where: { id: data.classroomId },
         include: {
@@ -22,7 +26,6 @@ export class StudentsService {
             select: {
               enrollments: {
                 where: {
-                  // 🔥 Mágico: Solo contamos a los que realmente ocupan espacio
                   status: {
                     in: [
                       EnrollmentStatus.INSCRITO,
@@ -44,16 +47,26 @@ export class StudentsService {
         );
       }
 
-      // 2. CREAR O BUSCAR AL ESTUDIANTE
+      // 2. CREAR O BUSCAR AL ESTUDIANTE (BÚSQUEDA SEGURA)
       let student;
       if (data.ci && data.ci.trim() !== '') {
-        student = await tx.student.findUnique({ where: { ci: data.ci } });
+        const studentCiHash = this.encryptionService.generateBlindIndex(
+          data.ci,
+        ) as string;
+        student = await tx.student.findUnique({
+          where: { ciHash: studentCiHash },
+        });
       }
 
       if (!student) {
         student = await tx.student.create({
           data: {
-            ci: data.ci,
+            // 🔥 Guardamos encriptado y con Hash
+            ciHash: data.ci
+              ? this.encryptionService.generateBlindIndex(data.ci)
+              : undefined,
+            ci: data.ci ? this.encryptionService.encrypt(data.ci) : undefined,
+
             complement: data.complement,
             expedition: data.expedition,
             documentType: data.documentType,
@@ -66,12 +79,13 @@ export class StudentsService {
             birthDepartment: data.birthDepartment,
             birthProvince: data.birthProvince,
             birthLocality: data.birthLocality,
+
+            // Los certificados quedan listos para Fase 2 estricta si decides encriptarlos aquí
             certOficialia: data.certOficialia,
             certLibro: data.certLibro,
             certPartida: data.certPartida,
             certFolio: data.certFolio,
 
-            // Capacidades Diferentes
             hasDisability: data.hasDisability ?? false,
             disabilityRegistry: data.disabilityRegistry,
             disabilityCode: data.disabilityCode,
@@ -89,13 +103,12 @@ export class StudentsService {
             talentIQ: data.talentIQ,
             talentModality: data.talentModality || [],
 
-            // Si es un alumno de traspaso y llenó su código, lo guardamos globalmente
             rudeCode: data.rudeCode,
           },
         });
       }
 
-      // 3. VALIDAR QUE NO ESTÉ INSCRITO YA EN ESTA GESTIÓN
+      // 3. VALIDAR DUPLICIDAD EN LA GESTIÓN
       const existingEnrollment = await tx.enrollment.findUnique({
         where: {
           studentId_academicYearId: {
@@ -111,25 +124,40 @@ export class StudentsService {
         );
       }
 
-      // 4. CREAR A LOS TUTORES Y CONECTARLOS
+      // 4. CREAR A LOS TUTORES (BÚSQUEDA SEGURA)
       for (const guardianData of data.guardians) {
         let guardian;
         if (guardianData.ci) {
+          const tutorCiHash = this.encryptionService.generateBlindIndex(
+            guardianData.ci,
+          ) as string;
           guardian = await tx.guardian.findUnique({
-            where: { ci: guardianData.ci },
+            where: { ciHash: tutorCiHash },
           });
         }
 
         if (!guardian) {
           guardian = await tx.guardian.create({
             data: {
-              ci: guardianData.ci,
+              // 🔥 Guardamos encriptado y con Hash
+              ciHash: guardianData.ci
+                ? this.encryptionService.generateBlindIndex(guardianData.ci)
+                : undefined,
+              ci: guardianData.ci
+                ? this.encryptionService.encrypt(guardianData.ci)
+                : undefined,
+
               complement: guardianData.complement,
               expedition: guardianData.expedition,
               names: guardianData.names,
               lastNamePaterno: guardianData.lastNamePaterno,
               lastNameMaterno: guardianData.lastNameMaterno,
-              phone: guardianData.phone,
+
+              // 🔥 Teléfono encriptado
+              phone: guardianData.phone
+                ? this.encryptionService.encrypt(guardianData.phone)
+                : undefined,
+
               language: guardianData.language,
               occupation: guardianData.occupation,
               educationLevel: guardianData.educationLevel,
@@ -165,11 +193,11 @@ export class StudentsService {
           classroomId: data.classroomId,
           academicYearId: data.academicYearId,
           enrollmentType: data.enrollmentType,
-          status: EnrollmentStatus.REVISION_SIE, // Empieza en revisión para la secretaria
+          status: EnrollmentStatus.REVISION_SIE,
         },
       });
 
-      // 6. GUARDAR EL FORMULARIO RUDE SOCIOECONÓMICO
+      // 6. GUARDAR EL FORMULARIO RUDE
       if (data.rudeData) {
         await tx.rudeRecord.create({
           data: {
@@ -233,15 +261,21 @@ export class StudentsService {
         }
 
         await this.prisma.$transaction(async (tx) => {
-          // --- A. MANEJO DEL ESTUDIANTE ---
+          // --- A. MANEJO DEL ESTUDIANTE (BÚSQUEDA SEGURA) ---
+          const studentCiHash = this.encryptionService.generateBlindIndex(
+            ciEstudiante,
+          ) as string;
           let student = await tx.student.findUnique({
-            where: { ci: ciEstudiante },
+            where: { ciHash: studentCiHash },
           });
 
           if (!student) {
             student = await tx.student.create({
               data: {
-                ci: ciEstudiante,
+                // 🔥 Guardamos encriptado y con Hash
+                ciHash: studentCiHash,
+                ci: this.encryptionService.encrypt(ciEstudiante),
+
                 documentType: 'CI',
                 names: nombres.toUpperCase(),
                 lastNamePaterno: rowData.Apellido_Paterno
@@ -266,21 +300,33 @@ export class StudentsService {
             });
           }
 
-          // --- B. MANEJO DEL TUTOR Y HERMANOS ---
+          // --- B. MANEJO DEL TUTOR Y HERMANOS (BÚSQUEDA SEGURA) ---
+          const tutorCiHash = this.encryptionService.generateBlindIndex(
+            ciTutor,
+          ) as string;
           let guardian = await tx.guardian.findUnique({
-            where: { ci: ciTutor },
+            where: { ciHash: tutorCiHash },
           });
 
           if (!guardian) {
+            const rawPhone = rowData.Celular_Tutor
+              ? String(rowData.Celular_Tutor)
+              : null;
+
             guardian = await tx.guardian.create({
               data: {
-                ci: ciTutor,
+                // 🔥 Guardamos encriptado y con Hash
+                ciHash: tutorCiHash,
+                ci: this.encryptionService.encrypt(ciTutor),
+
                 names: nombresTutor.toUpperCase(),
                 lastNamePaterno: rowData.Paterno_Tutor
                   ? String(rowData.Paterno_Tutor).toUpperCase()
                   : null,
-                phone: rowData.Celular_Tutor
-                  ? String(rowData.Celular_Tutor)
+
+                // 🔥 Teléfono encriptado
+                phone: rawPhone
+                  ? this.encryptionService.encrypt(rawPhone)
                   : null,
               },
             });

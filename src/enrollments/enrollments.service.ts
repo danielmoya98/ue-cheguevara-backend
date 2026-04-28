@@ -8,7 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { Prisma } from '../../prisma/generated/client';
-import { SystemPermissions } from '../auth/constants/permissions.constant';
 import { EncryptionService } from '../common/services/encryption.service'; // 🔥 IMPORTADO
 
 @Injectable()
