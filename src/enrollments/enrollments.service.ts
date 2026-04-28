@@ -8,25 +8,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { Prisma } from '../../prisma/generated/client';
-import { EncryptionService } from '../common/services/encryption.service'; // 🔥 IMPORTADO
+import { EncryptionService } from '../common/services/encryption.service';
 
 @Injectable()
 export class EnrollmentsService {
   constructor(
     private prisma: PrismaService,
-    private encryptionService: EncryptionService, // 🔥 INYECTADO
+    private encryptionService: EncryptionService,
   ) {}
-
-  // ==========================================
-  // HELPER: ABAC - FILTRO DE CURSOS PARA DOCENTES
-  // ==========================================
-  private async getTeacherClassroomIds(userId: string): Promise<string[]> {
-    const assignments = await this.prisma.teacherAssignment.findMany({
-      where: { teacherId: userId },
-      select: { classroomId: true },
-    });
-    return assignments.map((a) => a.classroomId);
-  }
 
   async create(createEnrollmentDto: any) {
     const payload = createEnrollmentDto;
@@ -60,7 +49,7 @@ export class EnrollmentsService {
         const studentCiEnc = this.encryptionService.encrypt(payload.ci);
 
         student = await tx.student.upsert({
-          where: { ciHash: studentCiHash }, // 🔥 Búsqueda segura
+          where: { ciHash: studentCiHash },
           update: {
             hasDisability: payload.hasDisability,
             hasAutism: payload.hasAutism,
@@ -103,7 +92,7 @@ export class EnrollmentsService {
           const tutorCiEnc = this.encryptionService.encrypt(tutor.ci);
 
           const guardian = await tx.guardian.upsert({
-            where: { ciHash: tutorCiHash }, // 🔥 Búsqueda segura
+            where: { ciHash: tutorCiHash },
             update: {
               ci: tutorCiEnc,
               phone: tutor.phone
@@ -184,8 +173,11 @@ export class EnrollmentsService {
     });
   }
 
-  // 🔥 BUSCADOR (Actualizado con ABAC Corregido y Búsqueda Ciega)
-  async findAll(query: QueryEnrollmentDto, user: any) {
+  // 🔥 BUSCADOR (100% PURO - SIN ROLES EN CÓDIGO)
+  async findAll(
+    query: QueryEnrollmentDto,
+    policyScope: Prisma.EnrollmentWhereInput,
+  ) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -199,53 +191,36 @@ export class EnrollmentsService {
       level,
     } = query;
 
-    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
-    let allowedClassroomIds: string[] | null = null;
-
-    if (!isPowerUser) {
-      allowedClassroomIds = await this.getTeacherClassroomIds(user.userId);
-    }
-
     let statusFilter: any = undefined;
     if (status) statusFilter = { in: status.split(',') };
 
-    let classroomFilter: any = undefined;
-    if (classroomId) {
-      if (allowedClassroomIds && !allowedClassroomIds.includes(classroomId)) {
-        return { data: [], meta: { page, limit, total: 0, totalPages: 0 } };
-      }
-      classroomFilter = { id: classroomId };
-    } else if (level) {
-      classroomFilter = {
-        level: level,
-        ...(allowedClassroomIds && { id: { in: allowedClassroomIds } }),
-      };
-    } else if (allowedClassroomIds) {
-      classroomFilter = { id: { in: allowedClassroomIds } };
-    }
-
-    // 🔥 PREPARAMOS EL HASH DE BÚSQUEDA EXACTA
     const searchHash = search
       ? this.encryptionService.generateBlindIndex(search)
       : null;
 
+    // 🔥 FUSIONAMOS EL FILTRO DEL USUARIO CON EL ALCANCE DE LA POLÍTICA
     const whereCondition: Prisma.EnrollmentWhereInput = {
-      ...(academicYearId && { academicYearId }),
-      ...(statusFilter && { status: statusFilter }),
-      ...(enrollmentType && { enrollmentType }),
-      ...(classroomFilter && { classroom: classroomFilter }),
-      ...(search && {
-        student: {
-          OR: [
-            { names: { contains: search, mode: 'insensitive' } },
-            { lastNamePaterno: { contains: search, mode: 'insensitive' } },
-            { lastNameMaterno: { contains: search, mode: 'insensitive' } },
-            { rudeCode: { contains: search, mode: 'insensitive' } },
-            // Si el texto de búsqueda genera un hash, buscamos coincidencia exacta en CI
-            ...(searchHash ? [{ ciHash: searchHash }] : []),
-          ],
+      AND: [
+        policyScope,
+        {
+          ...(academicYearId && { academicYearId }),
+          ...(statusFilter && { status: statusFilter }),
+          ...(enrollmentType && { enrollmentType }),
+          ...(classroomId && { classroomId }),
+          ...(level && { classroom: { level } }),
+          ...(search && {
+            student: {
+              OR: [
+                { names: { contains: search, mode: 'insensitive' } },
+                { lastNamePaterno: { contains: search, mode: 'insensitive' } },
+                { lastNameMaterno: { contains: search, mode: 'insensitive' } },
+                { rudeCode: { contains: search, mode: 'insensitive' } },
+                ...(searchHash ? [{ ciHash: searchHash }] : []),
+              ],
+            },
+          }),
         },
-      }),
+      ],
     };
 
     const [total, rawData] = await Promise.all([
@@ -292,13 +267,12 @@ export class EnrollmentsService {
           }
           if (g.guardian.phone) {
             hasPhone = true;
-            targetPhone = this.encryptionService.decrypt(g.guardian.phone); // 🔥 Desencriptamos para la tabla
+            targetPhone = this.encryptionService.decrypt(g.guardian.phone);
           }
         });
       }
       const { guardians, ...studentClean } = enrollment.student;
 
-      // 🔥 Desencriptamos el CI del estudiante para mostrarlo
       studentClean.ci = this.encryptionService.decrypt(studentClean.ci);
 
       return {
@@ -314,10 +288,13 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 DETALLE COMPLETO
-  async findOne(id: string, user: any) {
-    const enrollment = await this.prisma.enrollment.findUnique({
-      where: { id },
+  // 🔥 DETALLE COMPLETO (PURO)
+  async findOne(id: string, policyScope: Prisma.EnrollmentWhereInput) {
+    const enrollment = await this.prisma.enrollment.findFirst({
+      where: {
+        id,
+        AND: [policyScope],
+      },
       include: {
         academicYear: true,
         classroom: true,
@@ -352,21 +329,12 @@ export class EnrollmentsService {
       },
     });
 
-    if (!enrollment) throw new NotFoundException(`Inscripción no encontrada.`);
-
-    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
-    if (!isPowerUser) {
-      const allowedClassroomIds = await this.getTeacherClassroomIds(
-        user.userId,
+    if (!enrollment) {
+      throw new NotFoundException(
+        `Inscripción no encontrada o no tienes permisos para ver a este estudiante.`,
       );
-      if (!allowedClassroomIds.includes(enrollment.classroomId)) {
-        throw new ForbiddenException(
-          'Privacidad: Este estudiante no pertenece a sus cursos.',
-        );
-      }
     }
 
-    // Desencriptar datos del estudiante principal
     enrollment.student.ci = this.encryptionService.decrypt(
       enrollment.student.ci,
     );
@@ -385,7 +353,6 @@ export class EnrollmentsService {
     const siblingsMap = new Map();
     if (enrollment.student.guardians) {
       enrollment.student.guardians.forEach((sg) => {
-        // Desencriptar datos del tutor
         sg.guardian.ci = this.encryptionService.decrypt(sg.guardian.ci);
         sg.guardian.phone = this.encryptionService.decrypt(sg.guardian.phone);
 
@@ -397,7 +364,7 @@ export class EnrollmentsService {
               id: sibling.id,
               names:
                 `${sibling.names} ${sibling.lastNamePaterno} ${sibling.lastNameMaterno || ''}`.trim(),
-              ci: this.encryptionService.decrypt(sibling.ci) || 'Sin CI', // 🔥 Desencriptar hermano
+              ci: this.encryptionService.decrypt(sibling.ci) || 'Sin CI',
               classroom: activeEnrollment
                 ? `${activeEnrollment.classroom.grade} "${activeEnrollment.classroom.section}" - ${activeEnrollment.classroom.level}`
                 : 'No inscrito este año',
@@ -413,10 +380,13 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 KARDEX LIGERO
-  async findKardex(id: string, user: any) {
-    const enrollment = await this.prisma.enrollment.findUnique({
-      where: { id },
+  // 🔥 KARDEX LIGERO (PURO)
+  async findKardex(id: string, policyScope: Prisma.EnrollmentWhereInput) {
+    const enrollment = await this.prisma.enrollment.findFirst({
+      where: {
+        id,
+        AND: [policyScope],
+      },
       select: {
         id: true,
         status: true,
@@ -455,21 +425,12 @@ export class EnrollmentsService {
       },
     });
 
-    if (!enrollment) throw new NotFoundException(`Kardex no encontrado.`);
-
-    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
-    if (!isPowerUser) {
-      const allowedClassroomIds = await this.getTeacherClassroomIds(
-        user.userId,
+    if (!enrollment) {
+      throw new NotFoundException(
+        `Kardex no encontrado o no tienes permisos para verlo.`,
       );
-      if (!allowedClassroomIds.includes(enrollment.classroomId)) {
-        throw new ForbiddenException(
-          'Privacidad: Este estudiante no pertenece a sus cursos.',
-        );
-      }
     }
 
-    // Desencriptar para la vista de Kardex
     enrollment.student.ci = this.encryptionService.decrypt(
       enrollment.student.ci,
     );
