@@ -12,10 +12,14 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { EncryptionService } from '../common/services/encryption.service'; // 🔥 IMPORTADO
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private encryptionService: EncryptionService, // 🔥 INYECTADO
+  ) {}
 
   // ==========================================
   // HELPER: VALIDACIÓN DE JERARQUÍA ABAC
@@ -63,13 +67,35 @@ export class UsersService {
       },
     });
     if (!user) throw new NotFoundException('Usuario no encontrado');
-    return { ...user, role: user.role?.name };
+
+    // 🔥 Desencriptamos los datos antes de enviarlos al front
+    return {
+      ...user,
+      role: user.role?.name,
+      ci: this.encryptionService.decrypt(user.ci),
+      phone: this.encryptionService.decrypt(user.phone),
+      address: this.encryptionService.decrypt(user.address),
+    };
   }
 
   async updateProfile(userId: string, data: UpdateProfileDto) {
+    const updateData: any = { ...data };
+
+    // 🔥 Encriptamos los datos sensibles entrantes
+    if (data.ci) {
+      updateData.ci = this.encryptionService.encrypt(data.ci);
+      updateData.ciHash = this.encryptionService.generateBlindIndex(data.ci);
+    }
+    if (data.phone) {
+      updateData.phone = this.encryptionService.encrypt(data.phone);
+    }
+    if (data.address) {
+      updateData.address = this.encryptionService.encrypt(data.address);
+    }
+
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
-      data,
+      data: updateData,
       select: {
         id: true,
         fullName: true,
@@ -81,9 +107,17 @@ export class UsersService {
         role: { select: { name: true } },
       },
     });
+
+    // 🔥 Desencriptamos la respuesta
     return {
       message: 'Perfil actualizado',
-      user: { ...updatedUser, role: updatedUser.role?.name },
+      user: {
+        ...updatedUser,
+        role: updatedUser.role?.name,
+        ci: this.encryptionService.decrypt(updatedUser.ci),
+        phone: this.encryptionService.decrypt(updatedUser.phone),
+        address: this.encryptionService.decrypt(updatedUser.address),
+      },
     };
   }
 
@@ -258,7 +292,7 @@ export class UsersService {
     });
     if (!targetUser) throw new NotFoundException(`Usuario no encontrado`);
 
-    // 🔥 VALIDACIÓN ABAC: El director no puede borrarse a sí mismo ni a sus jefes
+    // 🔥 VALIDACIÓN ABAC
     this.validateHierarchy(requestingUser, targetUser);
 
     await this.prisma.user.update({

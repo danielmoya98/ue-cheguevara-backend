@@ -9,10 +9,14 @@ import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { Prisma } from '../../prisma/generated/client';
 import { SystemPermissions } from '../auth/constants/permissions.constant';
+import { EncryptionService } from '../common/services/encryption.service'; // 🔥 IMPORTADO
 
 @Injectable()
 export class EnrollmentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private encryptionService: EncryptionService, // 🔥 INYECTADO
+  ) {}
 
   // ==========================================
   // HELPER: ABAC - FILTRO DE CURSOS PARA DOCENTES
@@ -48,17 +52,24 @@ export class EnrollmentsService {
         );
       }
 
-      // 2. SINCRONIZACIÓN DEL ESTUDIANTE
+      // 2. SINCRONIZACIÓN DEL ESTUDIANTE (CON BÓVEDA DE DATOS)
       let student;
       if (payload.ci) {
+        const studentCiHash = this.encryptionService.generateBlindIndex(
+          payload.ci,
+        ) as string;
+        const studentCiEnc = this.encryptionService.encrypt(payload.ci);
+
         student = await tx.student.upsert({
-          where: { ci: payload.ci },
+          where: { ciHash: studentCiHash }, // 🔥 Búsqueda segura
           update: {
             hasDisability: payload.hasDisability,
             hasAutism: payload.hasAutism,
+            ci: studentCiEnc,
           },
           create: {
-            ci: payload.ci,
+            ciHash: studentCiHash,
+            ci: studentCiEnc,
             documentType: payload.documentType,
             names: payload.names,
             lastNamePaterno: payload.lastNamePaterno,
@@ -84,22 +95,33 @@ export class EnrollmentsService {
         });
       }
 
-      // 3. SINCRONIZACIÓN DE TUTORES
+      // 3. SINCRONIZACIÓN DE TUTORES (CON BÓVEDA DE DATOS)
       if (payload.guardians && payload.guardians.length > 0) {
         for (const tutor of payload.guardians) {
+          const tutorCiHash = this.encryptionService.generateBlindIndex(
+            tutor.ci,
+          ) as string;
+          const tutorCiEnc = this.encryptionService.encrypt(tutor.ci);
+
           const guardian = await tx.guardian.upsert({
-            where: { ci: tutor.ci },
+            where: { ciHash: tutorCiHash }, // 🔥 Búsqueda segura
             update: {
-              phone: tutor.phone,
+              ci: tutorCiEnc,
+              phone: tutor.phone
+                ? this.encryptionService.encrypt(tutor.phone)
+                : null,
               occupation: tutor.occupation,
               educationLevel: tutor.educationLevel,
             },
             create: {
-              ci: tutor.ci,
+              ciHash: tutorCiHash,
+              ci: tutorCiEnc,
               names: tutor.names,
               lastNamePaterno: tutor.lastNamePaterno,
               lastNameMaterno: tutor.lastNameMaterno,
-              phone: tutor.phone,
+              phone: tutor.phone
+                ? this.encryptionService.encrypt(tutor.phone)
+                : null,
               occupation: tutor.occupation,
               educationLevel: tutor.educationLevel,
             },
@@ -146,8 +168,12 @@ export class EnrollmentsService {
           department: payload.department,
           province: payload.province,
           municipality: payload.municipality,
-          street: payload.street,
-          cellphone: payload.cellphone,
+          street: payload.street
+            ? this.encryptionService.encrypt(payload.street)
+            : null,
+          cellphone: payload.cellphone
+            ? this.encryptionService.encrypt(payload.cellphone)
+            : null,
           nativeLanguage: payload.nativeLanguage,
           transportType: payload.transportType,
           transportTime: payload.transportTime,
@@ -159,7 +185,7 @@ export class EnrollmentsService {
     });
   }
 
-  // 🔥 BUSCADOR (Actualizado con ABAC Corregido)
+  // 🔥 BUSCADOR (Actualizado con ABAC Corregido y Búsqueda Ciega)
   async findAll(query: QueryEnrollmentDto, user: any) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
@@ -174,12 +200,9 @@ export class EnrollmentsService {
       level,
     } = query;
 
-    // 🔥 ABAC: Identificar si es usuario con poder (Admin o Director)
     const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
-
     let allowedClassroomIds: string[] | null = null;
 
-    // Si NO es power user, asumimos que es docente y limitamos su alcance
     if (!isPowerUser) {
       allowedClassroomIds = await this.getTeacherClassroomIds(user.userId);
     }
@@ -202,6 +225,11 @@ export class EnrollmentsService {
       classroomFilter = { id: { in: allowedClassroomIds } };
     }
 
+    // 🔥 PREPARAMOS EL HASH DE BÚSQUEDA EXACTA
+    const searchHash = search
+      ? this.encryptionService.generateBlindIndex(search)
+      : null;
+
     const whereCondition: Prisma.EnrollmentWhereInput = {
       ...(academicYearId && { academicYearId }),
       ...(statusFilter && { status: statusFilter }),
@@ -213,8 +241,9 @@ export class EnrollmentsService {
             { names: { contains: search, mode: 'insensitive' } },
             { lastNamePaterno: { contains: search, mode: 'insensitive' } },
             { lastNameMaterno: { contains: search, mode: 'insensitive' } },
-            { ci: { contains: search, mode: 'insensitive' } },
             { rudeCode: { contains: search, mode: 'insensitive' } },
+            // Si el texto de búsqueda genera un hash, buscamos coincidencia exacta en CI
+            ...(searchHash ? [{ ciHash: searchHash }] : []),
           ],
         },
       }),
@@ -264,11 +293,15 @@ export class EnrollmentsService {
           }
           if (g.guardian.phone) {
             hasPhone = true;
-            targetPhone = g.guardian.phone;
+            targetPhone = this.encryptionService.decrypt(g.guardian.phone); // 🔥 Desencriptamos para la tabla
           }
         });
       }
       const { guardians, ...studentClean } = enrollment.student;
+
+      // 🔥 Desencriptamos el CI del estudiante para mostrarlo
+      studentClean.ci = this.encryptionService.decrypt(studentClean.ci);
+
       return {
         ...enrollment,
         student: studentClean,
@@ -282,7 +315,7 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 DETALLE COMPLETO (Actualizado con ABAC Corregido)
+  // 🔥 DETALLE COMPLETO
   async findOne(id: string, user: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
@@ -322,7 +355,6 @@ export class EnrollmentsService {
 
     if (!enrollment) throw new NotFoundException(`Inscripción no encontrada.`);
 
-    // ABAC
     const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
     if (!isPowerUser) {
       const allowedClassroomIds = await this.getTeacherClassroomIds(
@@ -335,9 +367,29 @@ export class EnrollmentsService {
       }
     }
 
+    // Desencriptar datos del estudiante principal
+    enrollment.student.ci = this.encryptionService.decrypt(
+      enrollment.student.ci,
+    );
+    if (enrollment.rudeRecord) {
+      enrollment.rudeRecord.street = this.encryptionService.decrypt(
+        enrollment.rudeRecord.street,
+      );
+      enrollment.rudeRecord.cellphone = this.encryptionService.decrypt(
+        enrollment.rudeRecord.cellphone,
+      );
+      enrollment.rudeRecord.phone = this.encryptionService.decrypt(
+        enrollment.rudeRecord.phone,
+      );
+    }
+
     const siblingsMap = new Map();
     if (enrollment.student.guardians) {
       enrollment.student.guardians.forEach((sg) => {
+        // Desencriptar datos del tutor
+        sg.guardian.ci = this.encryptionService.decrypt(sg.guardian.ci);
+        sg.guardian.phone = this.encryptionService.decrypt(sg.guardian.phone);
+
         sg.guardian.students.forEach((siblingLink) => {
           const sibling = siblingLink.student;
           if (sibling.id !== enrollment.studentId) {
@@ -346,7 +398,7 @@ export class EnrollmentsService {
               id: sibling.id,
               names:
                 `${sibling.names} ${sibling.lastNamePaterno} ${sibling.lastNameMaterno || ''}`.trim(),
-              ci: sibling.ci || 'Sin CI',
+              ci: this.encryptionService.decrypt(sibling.ci) || 'Sin CI', // 🔥 Desencriptar hermano
               classroom: activeEnrollment
                 ? `${activeEnrollment.classroom.grade} "${activeEnrollment.classroom.section}" - ${activeEnrollment.classroom.level}`
                 : 'No inscrito este año',
@@ -362,7 +414,7 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 KARDEX LIGERO (Actualizado con ABAC Corregido)
+  // 🔥 KARDEX LIGERO
   async findKardex(id: string, user: any) {
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id },
@@ -406,7 +458,6 @@ export class EnrollmentsService {
 
     if (!enrollment) throw new NotFoundException(`Kardex no encontrado.`);
 
-    // ABAC
     const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
     if (!isPowerUser) {
       const allowedClassroomIds = await this.getTeacherClassroomIds(
@@ -418,6 +469,20 @@ export class EnrollmentsService {
         );
       }
     }
+
+    // Desencriptar para la vista de Kardex
+    enrollment.student.ci = this.encryptionService.decrypt(
+      enrollment.student.ci,
+    );
+    if (enrollment.rudeRecord) {
+      enrollment.rudeRecord.street = this.encryptionService.decrypt(
+        enrollment.rudeRecord.street,
+      );
+    }
+    enrollment.student.guardians.forEach((g) => {
+      g.guardian.ci = this.encryptionService.decrypt(g.guardian.ci);
+      g.guardian.phone = this.encryptionService.decrypt(g.guardian.phone);
+    });
 
     return { data: enrollment };
   }
