@@ -10,17 +10,22 @@ export class EnrollmentsPolicy {
     const permissions = user.permissions || [];
 
     // 1. Acceso Total (Admin / Director)
+    // 🔥 Ahora acepta tanto el permiso de Inscripción como el de Estudiante
     if (
       permissions.includes('manage:all:all') ||
-      permissions.includes('read:all:Enrollment')
+      permissions.includes('read:all:Enrollment') ||
+      permissions.includes('read:all:Student')
     ) {
       return {}; // Retorna un filtro vacío (puede ver TODO)
     }
 
     // 2. Acceso Restringido (Docente)
-    if (permissions.includes('read:own:Enrollment')) {
+    // 🔥 Ahora acepta tanto el permiso de Inscripción como el de Estudiante
+    if (
+      permissions.includes('read:own:Enrollment') ||
+      permissions.includes('read:own:Student')
+    ) {
       return {
-        // 🔥 CORRECCIÓN: En tu schema, la relación se llama "subjectAssignments"
         classroom: {
           subjectAssignments: {
             some: { teacherId: user.userId },
@@ -42,7 +47,8 @@ export class EnrollmentsPolicy {
     const permissions = user.permissions || [];
     if (
       permissions.includes('manage:all:all') ||
-      permissions.includes('write:any:Enrollment')
+      permissions.includes('write:any:Enrollment') ||
+      permissions.includes('update:all:Student')
     ) {
       return true;
     }
