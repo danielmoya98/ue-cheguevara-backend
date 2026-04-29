@@ -8,7 +8,6 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAcademicYearDto } from './dto/create-academic-year.dto';
 import { UpdateAcademicYearDto } from './dto/update-academic-year.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-// 🔥 IMPORTANTE: Añadimos TrimesterName
 import { AcademicStatus, TrimesterName } from '../../prisma/generated/client';
 
 @Injectable()
@@ -50,7 +49,7 @@ export class AcademicYearsService {
       );
     }
 
-    // 🔥 CORRECCIÓN: Transacción Atómica + Auto-Creación de Trimestres
+    // Transacción Atómica + Auto-Creación de Trimestres
     return this.prisma.$transaction(async (tx) => {
       if (data.status === AcademicStatus.ACTIVE) {
         await tx.academicYear.updateMany({
@@ -58,17 +57,35 @@ export class AcademicYearsService {
           data: { status: AcademicStatus.CLOSED },
         });
       }
-      
+
       // 1. Creamos la Gestión
       const newYear = await tx.academicYear.create({ data });
 
       // 2. Generamos los 3 trimestres por defecto (Cerrados y con fechas base)
       await tx.trimester.createMany({
         data: [
-          { academicYearId: newYear.id, name: TrimesterName.PRIMER_TRIMESTRE, startDate: data.startDate, endDate: data.endDate, isOpen: false },
-          { academicYearId: newYear.id, name: TrimesterName.SEGUNDO_TRIMESTRE, startDate: data.startDate, endDate: data.endDate, isOpen: false },
-          { academicYearId: newYear.id, name: TrimesterName.TERCER_TRIMESTRE, startDate: data.startDate, endDate: data.endDate, isOpen: false },
-        ]
+          {
+            academicYearId: newYear.id,
+            name: TrimesterName.PRIMER_TRIMESTRE,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            isOpen: false,
+          },
+          {
+            academicYearId: newYear.id,
+            name: TrimesterName.SEGUNDO_TRIMESTRE,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            isOpen: false,
+          },
+          {
+            academicYearId: newYear.id,
+            name: TrimesterName.TERCER_TRIMESTRE,
+            startDate: data.startDate,
+            endDate: data.endDate,
+            isOpen: false,
+          },
+        ],
       });
 
       return newYear;
@@ -120,12 +137,11 @@ export class AcademicYearsService {
   async findCurrentActive() {
     const current = await this.prisma.academicYear.findFirst({
       where: { status: AcademicStatus.ACTIVE },
-      // 🔥 INCLUSIÓN: Devolvemos los trimestres ordenados al Frontend
       include: {
         trimesters: {
-          orderBy: { name: 'asc' }
-        }
-      }
+          orderBy: { name: 'asc' },
+        },
+      },
     });
     return current || null;
   }
@@ -182,11 +198,9 @@ export class AcademicYearsService {
       );
     }
 
-    // Prisma eliminará los trimestres automáticamente si configuraste onDelete: Cascade, 
-    // pero si no, es bueno hacerlo explícito:
     await this.prisma.trimester.deleteMany({ where: { academicYearId: id } });
     await this.prisma.academicYear.delete({ where: { id } });
-    
+
     return { message: `Gestión ${year.year} eliminada correctamente.` };
   }
 }

@@ -219,6 +219,11 @@ export class RolesService {
         subject: 'Audit',
         description: 'Ver logs y trazabilidad de los usuarios',
       },
+      {
+        action: 'manage:all',
+        subject: 'AcademicYear',
+        description: 'Gestionar años académicos y trimestres',
+      },
     ];
 
     // Insertar el catálogo

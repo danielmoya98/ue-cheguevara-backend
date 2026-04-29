@@ -20,21 +20,23 @@ import { AuthGuard } from '@nestjs/passport';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
-// 🔥 IMPORTACIONES DE LA NUEVA SEGURIDAD RBAC
+// 🔥 IMPORTACIONES DE LA NUEVA SEGURIDAD ABAC
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
-import { SystemPermissions } from '../auth/constants/permissions.constant';
+import { SystemPermissions } from '../auth/constants/permissions.constant'; // 🔥 Enum Oficial
 
 @ApiTags('Gestión Académica')
 @ApiCookieAuth('uecg_access_token')
-// 🔥 Usamos el nuevo PermissionsGuard en lugar de RolesGuard
+// 🔥 El guardián interceptará y validará el formato ABAC
 @UseGuards(AuthGuard('jwt'), PermissionsGuard)
 @Controller('academic-years')
 export class AcademicYearsController {
   constructor(private readonly academicYearsService: AcademicYearsService) {}
 
   // =======================================================
-  // ENDPOINTS DE LECTURA (Acceso para cualquier usuario logueado)
+  // ENDPOINTS DE LECTURA
+  // (Sin @RequirePermissions: Abiertos a cualquier usuario logueado
+  // porque TODOS necesitan saber cuál es la gestión actual)
   // =======================================================
 
   @Get('current')
@@ -56,11 +58,11 @@ export class AcademicYearsController {
   }
 
   // =======================================================
-  // ENDPOINTS ADMINISTRATIVOS (Requieren Permisos RBAC)
+  // ENDPOINTS ADMINISTRATIVOS (Requieren Permisos ABAC estrictos)
   // =======================================================
 
   @Post()
-  @RequirePermissions(SystemPermissions.ACADEMIC_YEARS_CREATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_ACADEMIC_YEAR) // 🔥 Usando el Enum
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Crea una nueva gestión escolar' })
   create(@Body() createAcademicYearDto: CreateAcademicYearDto) {
@@ -68,7 +70,7 @@ export class AcademicYearsController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.ACADEMIC_YEARS_UPDATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_ACADEMIC_YEAR) // 🔥 Usando el Enum
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualiza los datos de una gestión' })
   update(
@@ -79,7 +81,7 @@ export class AcademicYearsController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.ACADEMIC_YEARS_DELETE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_ACADEMIC_YEAR) // 🔥 Usando el Enum
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina una gestión si no tiene cursos asignados' })
   remove(@Param('id') id: string) {
