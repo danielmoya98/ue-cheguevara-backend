@@ -98,11 +98,12 @@ export class RolesService {
     return { message: 'Política de acceso eliminada del sistema' };
   }
 
-  // ==========================================
-  // 🔥 AUTO-SEEDER PARA LA FASE 3 (EJECUTAR UNA VEZ)
-  // ==========================================
   async seedMasterPermissions() {
-    // 1. Catálogo maestro de permisos (Fase 3 ABAC)
+    // 1. Limpiar TODA la tabla de permisos y enlaces (Para empezar de cero con ABAC)
+    // Esto borra en cascada los enlaces en role_permissions
+    await this.prisma.permission.deleteMany({});
+
+    // 2. Catálogo maestro de permisos ABAC
     const permissionsData = [
       // Root / Super Admin
       {
@@ -232,19 +233,10 @@ export class RolesService {
       },
     ];
 
-    // 2. Insertamos todos los permisos evitando duplicados (UPSERT)
-    for (const perm of permissionsData) {
-      // Usamos el id de acción y subject para asegurarnos de no duplicar
-      const existing = await this.prisma.permission.findFirst({
-        where: { action: perm.action, subject: perm.subject },
-      });
+    // 3. Crear los permisos limpios
+    await this.prisma.permission.createMany({ data: permissionsData });
 
-      if (!existing) {
-        await this.prisma.permission.create({ data: perm });
-      }
-    }
-
-    // 3. Obtenemos los roles principales
+    // 4. Obtenemos los roles principales
     const superAdmin = await this.prisma.role.findUnique({
       where: { name: 'SUPER_ADMIN' },
     });
@@ -257,57 +249,56 @@ export class RolesService {
 
     const allPermissions = await this.prisma.permission.findMany();
 
-    // 4. Mapeo de Permisos por Rol
+    // 5. Mapeo de Permisos por Rol (El enlace clave)
     if (superAdmin) {
       const rootPerm = allPermissions.find(
         (p) => p.action === 'manage:all' && p.subject === 'all',
       );
       if (rootPerm) {
-        await this.prisma.rolePermission.upsert({
-          where: {
-            roleId_permissionId: {
-              roleId: superAdmin.id,
-              permissionId: rootPerm.id,
-            },
-          },
-          update: {},
-          create: { roleId: superAdmin.id, permissionId: rootPerm.id },
+        await this.prisma.rolePermission.create({
+          data: { roleId: superAdmin.id, permissionId: rootPerm.id },
         });
       }
     }
 
     if (director) {
-      // El director tiene casi todo, excepto el root
-      const directorPerms = allPermissions.filter((p) => p.subject !== 'all');
+      // El director tiene casi todo, excepto el root y los "own" operativos puros
+      const directorPerms = allPermissions.filter(
+        (p) => p.subject !== 'all' && !p.action.includes('own'),
+      );
+
+      // Asegurar que el director tenga acceso a su dashboard
+      const dashboardPerm = allPermissions.find(
+        (p) => p.action === 'read:all' && p.subject === 'Dashboard',
+      );
+      if (dashboardPerm && !directorPerms.includes(dashboardPerm)) {
+        directorPerms.push(dashboardPerm);
+      }
+
       for (const perm of directorPerms) {
-        await this.prisma.rolePermission.upsert({
-          where: {
-            roleId_permissionId: { roleId: director.id, permissionId: perm.id },
-          },
-          update: {},
-          create: { roleId: director.id, permissionId: perm.id },
+        await this.prisma.rolePermission.create({
+          data: { roleId: director.id, permissionId: perm.id },
         });
       }
     }
 
     if (docente) {
-      // El docente solo tiene permisos "own" y su dashboard
+      // El docente solo tiene permisos "own" y su dashboard operativo
       const docentePerms = allPermissions.filter(
         (p) =>
           (p.action.includes('own') && p.subject !== 'Dashboard') ||
           (p.action === 'read:own' && p.subject === 'Dashboard'),
       );
       for (const perm of docentePerms) {
-        await this.prisma.rolePermission.upsert({
-          where: {
-            roleId_permissionId: { roleId: docente.id, permissionId: perm.id },
-          },
-          update: {},
-          create: { roleId: docente.id, permissionId: perm.id },
+        await this.prisma.rolePermission.create({
+          data: { roleId: docente.id, permissionId: perm.id },
         });
       }
     }
 
-    return { message: 'Permisos sembrados y asignados exitosamente.' };
+    return {
+      message:
+        'Base de datos de permisos limpiada y sembrada con formato ABAC.',
+    };
   }
 }
