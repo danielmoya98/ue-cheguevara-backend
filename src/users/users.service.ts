@@ -63,42 +63,21 @@ export class UsersService {
         phone: true,
         address: true,
         specialty: true,
-        // 🔥 1. AHORA SÍ TRAEMOS LOS PERMISOS DESDE LA BASE DE DATOS
-        role: {
-          select: {
-            name: true,
-            permissions: {
-              select: {
-                permission: {
-                  select: {
-                    action: true,
-                    subject: true
-                  }
-                }
-              }
-            }
-          }
-        },
+        role: { select: { name: true } },
       },
     });
-
     if (!user) throw new NotFoundException('Usuario no encontrado');
 
-    // 🔥 2. MAPEAMOS LOS PERMISOS AL FORMATO QUE ENTIENDE EL FRONTEND ("read:own:Student")
-    const userPermissions = user.role?.permissions.map(
-      (rp) => `${rp.permission.action}:${rp.permission.subject}`
-    ) || [];
-
-    // 🔥 3. ENVIAMOS TODO AL FRONTEND
+    // 🔥 Desencriptamos los datos antes de enviarlos al front
     return {
       ...user,
       role: user.role?.name,
-      permissions: userPermissions, // <--- ESTA ES LA PIEZA FALTANTE DEL ROMPECABEZAS
       ci: this.encryptionService.decrypt(user.ci),
       phone: this.encryptionService.decrypt(user.phone),
       address: this.encryptionService.decrypt(user.address),
     };
   }
+
   async updateProfile(userId: string, data: UpdateProfileDto) {
     const updateData: any = { ...data };
 
