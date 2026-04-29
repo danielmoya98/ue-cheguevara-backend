@@ -7,6 +7,8 @@ import { FirebaseModule } from '../firebase/firebase.module';
 import { DataUpdatesBroadcastService } from './data-updates-broadcast.service';
 import { DataUpdatesTransactionService } from './data-updates-transaction.service';
 import { MailService } from '../mail/mail.service'; // 🔥 Importar el servicio
+import { EncryptionService } from '../common/services/encryption.service'; // 🔥 IMPORTADO
+
 @Module({
   imports: [
     PrismaModule,
@@ -17,8 +19,12 @@ import { MailService } from '../mail/mail.service'; // 🔥 Importar el servicio
     }),
   ],
   controllers: [DataUpdatesController],
-  providers: [DataUpdatesService, DataUpdatesBroadcastService, DataUpdatesTransactionService,
-    MailService
+  providers: [
+    DataUpdatesService,
+    DataUpdatesBroadcastService,
+    DataUpdatesTransactionService,
+    MailService,
+    EncryptionService, // 🔥 INYECTADO
   ],
 })
 export class DataUpdatesModule {}
