@@ -99,144 +99,133 @@ export class RolesService {
   }
 
   async seedMasterPermissions() {
-    // 1. Limpiar TODA la tabla de permisos y enlaces (Para empezar de cero con ABAC)
-    // Esto borra en cascada los enlaces en role_permissions
+    // 1. LIMPIEZA ABSOLUTA (Garantiza que solo exista el estándar oficial)
     await this.prisma.permission.deleteMany({});
 
-    // 2. Catálogo maestro de permisos ABAC
+    // 2. EL CATÁLOGO OFICIAL (Tu fuente de la verdad)
     const permissionsData = [
-      // Root / Super Admin
       {
         action: 'manage:all',
         subject: 'all',
-        description: 'Acceso absoluto al sistema',
+        description: 'Acceso absoluto al sistema (ROOT)',
       },
-
-      // Dashboard General
       {
         action: 'read:all',
         subject: 'Dashboard',
-        description: 'Ver dashboard global',
+        description: 'Ver el panel de estadísticas globales',
       },
       {
         action: 'read:own',
         subject: 'Dashboard',
-        description: 'Ver dashboard operativo',
-      },
-
-      // Módulos Docentes
-      {
-        action: 'read:own',
-        subject: 'Timetable',
-        description: 'Ver su propio horario',
-      },
-      {
-        action: 'create:own',
-        subject: 'Attendance',
-        description: 'Tomar asistencia de sus clases',
-      },
-      {
-        action: 'update:own',
-        subject: 'Grade',
-        description: 'Calificar a sus estudiantes',
-      },
-      {
-        action: 'read:own',
-        subject: 'Student',
-        description: 'Ver solo a sus estudiantes asignados',
-      },
-
-      // Módulos Administrativos
-      {
-        action: 'read:all',
-        subject: 'Enrollment',
-        description: 'Ver todas las inscripciones',
-      },
-      {
-        action: 'write:any',
-        subject: 'Enrollment',
-        description: 'Crear y modificar inscripciones',
+        description: 'Ver el panel operativo personal',
       },
       {
         action: 'read:all',
         subject: 'Student',
-        description: 'Ver todos los estudiantes del colegio',
+        description: 'Ver directorio completo de estudiantes',
+      },
+      {
+        action: 'read:own',
+        subject: 'Student',
+        description: 'Ver únicamente a sus estudiantes asignados',
       },
       {
         action: 'update:all',
         subject: 'Student',
-        description: 'Aprobar datos RUDE',
+        description: 'Modificar/Aprobar datos (RUDE) de cualquier estudiante',
       },
       {
-        action: 'create:any',
-        subject: 'Identity',
-        description: 'Generar Carnets QR',
+        action: 'read:all',
+        subject: 'Enrollment',
+        description: 'Ver el historial de inscripciones global',
+      },
+      {
+        action: 'write:any',
+        subject: 'Enrollment',
+        description: 'Inscribir, editar y dar de baja estudiantes',
       },
       {
         action: 'read:all',
         subject: 'Attendance',
-        description: 'Ver asistencia global del colegio',
+        description: 'Ver control de asistencia de todo el colegio',
+      },
+      {
+        action: 'create:own',
+        subject: 'Attendance',
+        description: 'Tomar asistencia de sus clases asignadas',
       },
       {
         action: 'read:all',
         subject: 'Grade',
-        description: 'Ver sábanas de notas del colegio',
-      },
-
-      // Gestión Académica
-      {
-        action: 'manage:all',
-        subject: 'Classroom',
-        description: 'Gestionar aulas y paralelos',
+        description: 'Ver sábanas de notas de cualquier curso',
       },
       {
-        action: 'manage:all',
-        subject: 'Subject',
-        description: 'Gestionar materias',
-      },
-      {
-        action: 'manage:all',
-        subject: 'TeacherAssignment',
-        description: 'Asignar carga horaria',
+        action: 'update:own',
+        subject: 'Grade',
+        description: 'Calificar únicamente sus materias asignadas',
       },
       {
         action: 'manage:all',
         subject: 'Timetable',
-        description: 'Armar horarios escolares',
+        description: 'Armar y editar horarios escolares generales',
+      },
+      {
+        action: 'read:own',
+        subject: 'Timetable',
+        description: 'Ver únicamente su propio horario',
+      },
+      {
+        action: 'create:any',
+        subject: 'Identity',
+        description: 'Generar y revocar Carnets Digitales QR',
+      },
+      {
+        action: 'manage:all',
+        subject: 'Classroom',
+        description: 'Crear y configurar Cursos y Paralelos',
+      },
+      {
+        action: 'manage:all',
+        subject: 'Subject',
+        description: 'Gestionar catálogo de Materias',
+      },
+      {
+        action: 'manage:all',
+        subject: 'TeacherAssignment',
+        description: 'Asignar carga horaria a los docentes',
       },
       {
         action: 'manage:all',
         subject: 'PhysicalSpace',
-        description: 'Gestionar espacios físicos',
+        description: 'Gestionar aulas, laboratorios y canchas',
       },
-
-      // Configuración Root
       {
         action: 'manage:all',
         subject: 'User',
-        description: 'Gestionar cuentas de usuario',
+        description: 'Gestionar cuentas de personal',
       },
       {
         action: 'manage:all',
         subject: 'Role',
-        description: 'Gestionar roles y permisos',
+        description: 'Crear nuevos roles y asignar permisos',
       },
       {
         action: 'manage:all',
         subject: 'Institution',
-        description: 'Configurar RUE y colegio',
+        description: 'Configurar RUE, logo y datos del colegio',
       },
       {
         action: 'read:all',
         subject: 'Audit',
-        description: 'Ver logs del sistema',
+        description: 'Ver logs y trazabilidad de los usuarios',
       },
     ];
 
-    // 3. Crear los permisos limpios
+    // Insertar el catálogo
     await this.prisma.permission.createMany({ data: permissionsData });
+    const allPermissions = await this.prisma.permission.findMany();
 
-    // 4. Obtenemos los roles principales
+    // 3. ASIGNACIÓN ESTRICTA DE ROLES BASE
     const superAdmin = await this.prisma.role.findUnique({
       where: { name: 'SUPER_ADMIN' },
     });
@@ -247,34 +236,31 @@ export class RolesService {
       where: { name: 'DOCENTE' },
     });
 
-    const allPermissions = await this.prisma.permission.findMany();
-
-    // 5. Mapeo de Permisos por Rol (El enlace clave)
+    // -> SUPER ADMIN: Solo necesita la llave 'manage:all:all'
     if (superAdmin) {
       const rootPerm = allPermissions.find(
         (p) => p.action === 'manage:all' && p.subject === 'all',
       );
-      if (rootPerm) {
+      if (rootPerm)
         await this.prisma.rolePermission.create({
           data: { roleId: superAdmin.id, permissionId: rootPerm.id },
         });
-      }
     }
 
+    // -> DIRECTOR: Todo lo que es "all" y "any" (Gestión Global), excepto cosas de Root (User, Role, Institution, Audit, all)
     if (director) {
-      // El director tiene casi todo, excepto el root y los "own" operativos puros
+      const directorSubjectsToExclude = [
+        'all',
+        'User',
+        'Role',
+        'Institution',
+        'Audit',
+      ];
       const directorPerms = allPermissions.filter(
-        (p) => p.subject !== 'all' && !p.action.includes('own'),
+        (p) =>
+          !directorSubjectsToExclude.includes(p.subject) &&
+          !p.action.includes('own'), // No le damos 'own' porque él ve 'all'
       );
-
-      // Asegurar que el director tenga acceso a su dashboard
-      const dashboardPerm = allPermissions.find(
-        (p) => p.action === 'read:all' && p.subject === 'Dashboard',
-      );
-      if (dashboardPerm && !directorPerms.includes(dashboardPerm)) {
-        directorPerms.push(dashboardPerm);
-      }
-
       for (const perm of directorPerms) {
         await this.prisma.rolePermission.create({
           data: { roleId: director.id, permissionId: perm.id },
@@ -282,11 +268,11 @@ export class RolesService {
       }
     }
 
+    // -> DOCENTE: Exclusivamente permisos "own" y su Dashboard
     if (docente) {
-      // El docente solo tiene permisos "own" y su dashboard operativo
       const docentePerms = allPermissions.filter(
         (p) =>
-          (p.action.includes('own') && p.subject !== 'Dashboard') ||
+          p.action.includes('own') ||
           (p.action === 'read:own' && p.subject === 'Dashboard'),
       );
       for (const perm of docentePerms) {
@@ -296,9 +282,6 @@ export class RolesService {
       }
     }
 
-    return {
-      message:
-        'Base de datos de permisos limpiada y sembrada con formato ABAC.',
-    };
+    return { message: 'Estándar Oficial ABAC implementado exitosamente.' };
   }
 }
