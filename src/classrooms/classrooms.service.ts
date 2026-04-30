@@ -8,8 +8,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-// 🔥 ELIMINADO Role de la importación
-import { AcademicStatus, Shift } from '../../prisma/generated/client';
+import { AcademicStatus} from '../../prisma/generated/client';
 import { CreateBulkClassroomsDto } from './dto/create-bulk-classrooms.dto';
 
 @Injectable()
@@ -28,7 +27,6 @@ export class ClassroomsService {
     }
 
     if (data.advisorId) {
-      // 🔥 NUEVA VALIDACIÓN: Buscamos incluyendo la relación Role
       const teacher = await this.prisma.user.findUnique({
         where: { id: data.advisorId },
         include: { role: true },
@@ -160,7 +158,6 @@ export class ClassroomsService {
     await this.findOne(id);
 
     if (data.advisorId) {
-      // 🔥 NUEVA VALIDACIÓN: Buscamos incluyendo la relación Role
       const teacher = await this.prisma.user.findUnique({
         where: { id: data.advisorId },
         include: { role: true },
@@ -193,9 +190,18 @@ export class ClassroomsService {
 
   async remove(id: string) {
     await this.findOne(id);
-    // Nota: Como tienes onDelete: Restrict o no definido en cascada para inscripciones,
-    // Prisma lanzará error automático si intentas borrar un curso con alumnos.
-    // Si quieres un mensaje amigable, deberías contar los enrollments antes.
+
+    // 🔥 MEJORA DE INTEGRIDAD: Evitamos que Prisma lance error crudo si el curso tiene alumnos
+    const enrolledStudents = await this.prisma.enrollment.count({
+      where: { classroomId: id },
+    });
+
+    if (enrolledStudents > 0) {
+      throw new ConflictException(
+        `No se puede eliminar este curso porque tiene ${enrolledStudents} alumnos inscritos.`,
+      );
+    }
+
     await this.prisma.classroom.delete({ where: { id } });
     return { message: 'Curso eliminado correctamente' };
   }

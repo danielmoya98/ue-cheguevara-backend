@@ -4,10 +4,35 @@ import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class AuditService {
-  private readonly logger = new Logger('AuditCron');
+  private readonly logger = new Logger(AuditService.name);
 
   constructor(private readonly prisma: PrismaService) {}
 
+  // ==========================================
+  // LECTURA DE LOGS (Movido desde el Controller)
+  // ==========================================
+  async getLogs(limit: string) {
+    // Aseguramos que sea un número válido, por defecto 50
+    const take = parseInt(limit, 10) || 50;
+
+    return this.prisma.auditLog.findMany({
+      take,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: {
+            fullName: true,
+            email: true,
+            role: { select: { name: true } },
+          },
+        },
+      },
+    });
+  }
+
+  // ==========================================
+  // MANTENIMIENTO AUTOMATIZADO
+  // ==========================================
   // 🔥 Se ejecuta todos los días exactamente a las 3:00 AM
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async handleLogPurge() {

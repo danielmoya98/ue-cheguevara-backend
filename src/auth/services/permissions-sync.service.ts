@@ -13,7 +13,7 @@ export class PermissionsSyncService implements OnModuleInit {
   }
 
   async sync() {
-    this.logger.log('🔄 Sincronizando catálogo de permisos con la DB...');
+    this.logger.log('🔄 Sincronizando catálogo ABAC de permisos con la DB...');
 
     // =========================================================
     // 1. SINCRONIZAR CATÁLOGO GLOBAL DE PERMISOS
@@ -21,7 +21,12 @@ export class PermissionsSyncService implements OnModuleInit {
     const permissionStrings = Object.values(SystemPermissions);
 
     for (const p of permissionStrings) {
-      const [action, subject] = p.split(':');
+      // 🔥 NUEVA LÓGICA ABAC: Dividimos "manage:all:PhysicalSpace"
+      const parts = p.split(':');
+      // action = "manage:all", subject = "PhysicalSpace"
+      const action = `${parts[0]}:${parts[1]}`;
+      const subject = parts[2];
+
       await this.prisma.permission.upsert({
         where: { action_subject: { action, subject } },
         update: {},
@@ -32,7 +37,7 @@ export class PermissionsSyncService implements OnModuleInit {
         },
       });
     }
-    this.logger.log('✅ Catálogo de permisos actualizado.');
+    this.logger.log('✅ Catálogo de permisos ABAC actualizado.');
 
     // =========================================================
     // 2. CONFIGURACIÓN DE ROLES FUNDACIONALES (Factory Defaults)
@@ -53,7 +58,7 @@ export class PermissionsSyncService implements OnModuleInit {
         .map((p) => p.id);
     };
 
-    // Definición de la "Receta" de accesos para cada rol
+    // 🔥 NUEVAS RECETAS ABAC
     const rolesConfig = [
       {
         name: 'SUPER_ADMIN',
@@ -64,56 +69,46 @@ export class PermissionsSyncService implements OnModuleInit {
       {
         name: 'DIRECTOR',
         description: 'Máxima Autoridad Pedagógica y Administrativa',
-        // Le damos autonomía total, excluyendo borrar el año, borrar matrículas o el manage:all
+        // Le damos autonomía casi total, excepto ROOT (MANAGE_ALL) y manipulación de roles pesados
         permissionIds: getPermIds([
-          SystemPermissions.USERS_READ,
-          SystemPermissions.USERS_WRITE,
-          SystemPermissions.IDENTITY_READ,
-          SystemPermissions.IDENTITY_WRITE,
-          SystemPermissions.IDENTITY_EXPORT,
-          SystemPermissions.INSTITUTION_WRITE,
-          SystemPermissions.PHYSICAL_SPACES_WRITE,
-          SystemPermissions.ACADEMIC_YEARS_CREATE,
-          SystemPermissions.ACADEMIC_YEARS_UPDATE,
-          SystemPermissions.TRIMESTERS_WRITE,
-          SystemPermissions.CLASS_PERIODS_CREATE,
-          SystemPermissions.CLASS_PERIODS_UPDATE,
-          SystemPermissions.CLASS_PERIODS_DELETE,
-          SystemPermissions.CLASSROOMS_CREATE,
-          SystemPermissions.CLASSROOMS_UPDATE,
-          SystemPermissions.CLASSROOMS_DELETE,
-          SystemPermissions.SUBJECTS_WRITE,
-          SystemPermissions.TEACHER_ASSIGNMENTS_READ,
-          SystemPermissions.TEACHER_ASSIGNMENTS_WRITE,
-          SystemPermissions.TIMETABLES_READ,
-          SystemPermissions.TIMETABLES_WRITE,
-          SystemPermissions.STUDENTS_WRITE,
-          SystemPermissions.ENROLLMENTS_READ,
-          SystemPermissions.ENROLLMENTS_WRITE,
-          SystemPermissions.GRADES_READ,
-          SystemPermissions.GRADES_WRITE,
-          SystemPermissions.ATTENDANCE_READ,
-          SystemPermissions.ATTENDANCE_WRITE,
-          SystemPermissions.ATTENDANCE_JUSTIFY,
-          SystemPermissions.RUDE_READ,
-          SystemPermissions.RUDE_WRITE,
-          SystemPermissions.RUDE_CAMPAIGN,
-          SystemPermissions.RUDE_MASSIVE,
+          SystemPermissions.MANAGE_ALL_ACADEMIC_YEAR,
+          SystemPermissions.READ_ALL_DASHBOARD,
+          SystemPermissions.READ_ALL_STUDENT,
+          SystemPermissions.UPDATE_ALL_STUDENT,
+          SystemPermissions.READ_ALL_ENROLLMENT,
+          SystemPermissions.WRITE_ANY_ENROLLMENT,
+          SystemPermissions.READ_ALL_ATTENDANCE,
+          SystemPermissions.MANAGE_ALL_ATTENDANCE,
+          SystemPermissions.READ_ALL_GRADE,
+          SystemPermissions.MANAGE_ALL_TIMETABLE,
+          SystemPermissions.CREATE_ANY_IDENTITY,
+          SystemPermissions.MANAGE_ALL_CLASSROOM,
+          SystemPermissions.MANAGE_ALL_SUBJECT,
+          SystemPermissions.MANAGE_ALL_TEACHER_ASSIGNMENT,
+          SystemPermissions.MANAGE_ALL_PHYSICAL_SPACE,
+          SystemPermissions.MANAGE_ALL_USER,
+          SystemPermissions.MANAGE_ALL_INSTITUTION,
+          SystemPermissions.READ_ALL_AUDIT,
         ]),
       },
       {
         name: 'DOCENTE',
         description: 'Plantel Docente (Acceso web y móvil)',
-        // Solo lo estrictamente necesario para su trabajo en el aula
+        // Solo permisos ":own" y lecturas limitadas a su jurisdicción
         permissionIds: getPermIds([
-          SystemPermissions.GRADES_READ,
-          SystemPermissions.GRADES_WRITE,
-          SystemPermissions.ATTENDANCE_READ,
-          SystemPermissions.ATTENDANCE_WRITE,
-          SystemPermissions.TIMETABLES_READ,
-          SystemPermissions.TEACHER_ASSIGNMENTS_READ,
-          SystemPermissions.ENROLLMENTS_READ, // Para que puedan ver la lista de sus alumnos
+          SystemPermissions.READ_OWN_DASHBOARD,
+          SystemPermissions.READ_OWN_STUDENT,
+          SystemPermissions.READ_ALL_ENROLLMENT,
+          SystemPermissions.CREATE_OWN_ATTENDANCE,
+          SystemPermissions.UPDATE_OWN_GRADE,
+          SystemPermissions.READ_OWN_TIMETABLE,
         ]),
+      },
+      {
+        name: 'PADRE',
+        description: 'Padre de Familia o Tutor (App Móvil)',
+        // Solo lectura estricta de sus propios dependientes
+        permissionIds: getPermIds([SystemPermissions.READ_OWN_GUARDIAN]),
       },
     ];
 
@@ -124,7 +119,7 @@ export class PermissionsSyncService implements OnModuleInit {
       // 3.1 Garantizamos que el rol exista
       const role = await this.prisma.role.upsert({
         where: { name: config.name },
-        update: {},
+        update: { description: config.description },
         create: {
           name: config.name,
           description: config.description,
@@ -149,7 +144,7 @@ export class PermissionsSyncService implements OnModuleInit {
     }
 
     this.logger.log(
-      '👑 Privilegios de SUPER_ADMIN, DIRECTOR y DOCENTE inicializados.',
+      '👑 Privilegios de SUPER_ADMIN, DIRECTOR, DOCENTE y PADRE inicializados y blindados.',
     );
   }
 }

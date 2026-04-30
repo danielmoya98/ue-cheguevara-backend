@@ -10,7 +10,7 @@ import {
 import { DataUpdatesService } from './data-updates.service';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -24,7 +24,7 @@ export class DataUpdatesController {
   @Post('broadcast/all')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_MASSIVE) // ☢️ Poder Nuclear
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC (Poder Nuclear)
   @ApiOperation({ summary: 'Envía Push a TODOS los padres del colegio' })
   async triggerMassiveCampaign() {
     return this.dataUpdatesService.broadcastToAll();
@@ -58,7 +58,7 @@ export class DataUpdatesController {
   @Get('pending')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_READ) // 🔥
+  @RequirePermissions(SystemPermissions.READ_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({
     summary: 'Obtiene todas las solicitudes que esperan revisión',
   })
@@ -69,7 +69,7 @@ export class DataUpdatesController {
   @Post(':id/approve')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_WRITE) // 🔥
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Aprueba una solicitud y fusiona los datos' })
   approveUpdate(@Param('id') id: string) {
     return this.dataUpdatesService.approveUpdate(id);
@@ -78,7 +78,7 @@ export class DataUpdatesController {
   @Patch(':id/reject')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_WRITE) // 🔥
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Rechaza una solicitud de actualización' })
   rejectUpdate(@Param('id') id: string, @Body('reason') reason: string) {
     return this.dataUpdatesService.rejectUpdate(
@@ -90,7 +90,7 @@ export class DataUpdatesController {
   @Patch(':enrollmentId/mark-physical')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_WRITE) // 🔥
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Registra que el padre entregó el RUDE en papel' })
   markPhysicalDelivery(@Param('enrollmentId') enrollmentId: string) {
     return this.dataUpdatesService.markPhysicalDelivery(enrollmentId);
@@ -99,7 +99,7 @@ export class DataUpdatesController {
   @Post('generate-link/:enrollmentId')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_CAMPAIGN) // 🔥
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Genera el enlace seguro JWT para WhatsApp/Email' })
   async generateUpdateLink(@Param('enrollmentId') enrollmentId: string) {
     const token =
@@ -111,7 +111,7 @@ export class DataUpdatesController {
   @Post('broadcast/:enrollmentId')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_CAMPAIGN) // 🔥
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Envía Push individual a tutores' })
   async triggerPushCampaign(@Param('enrollmentId') enrollmentId: string) {
     return this.dataUpdatesService.broadcastUpdateCampaign(enrollmentId);
@@ -120,7 +120,7 @@ export class DataUpdatesController {
   @Post('broadcast/classroom/:classroomId')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_CAMPAIGN) // 🔥
+  @RequirePermissions(SystemPermissions.UPDATE_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Envía Push a todos los padres de un curso' })
   async triggerClassroomCampaign(@Param('classroomId') classroomId: string) {
     return this.dataUpdatesService.broadcastToClassroom(classroomId);
@@ -129,7 +129,7 @@ export class DataUpdatesController {
   @Get('broadcast/classroom/:classroomId/preview')
   @ApiCookieAuth('uecg_access_token')
   @UseGuards(AuthGuard('jwt'), PermissionsGuard)
-  @RequirePermissions(SystemPermissions.RUDE_READ) // 🔥
+  @RequirePermissions(SystemPermissions.READ_ALL_STUDENT) // 🔥 ABAC
   @ApiOperation({
     summary: 'Simula a cuántos padres llegará la alerta por curso',
   })

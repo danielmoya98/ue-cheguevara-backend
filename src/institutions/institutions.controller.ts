@@ -25,7 +25,7 @@ import {
 } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -54,7 +54,7 @@ export class InstitutionsController {
   }
 
   @Patch('campaign-settings')
-  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_INSTITUTION) // 🔥 ABAC
   @ApiOperation({ summary: 'Actualiza la configuración de la campaña RUDE' })
   async updateCampaignSettings(@Body() body: UpdateCampaignSettingsDto) {
     const result = await this.institutionsService.updateCampaignSettings(body);
@@ -71,7 +71,7 @@ export class InstitutionsController {
   }
 
   @Patch('attendance-settings')
-  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_INSTITUTION) // 🔥 ABAC
   @ApiOperation({ summary: 'Actualiza las reglas de asistencia' })
   async updateAttendanceSettings(@Body() body: UpdateAttendanceSettingsDto) {
     const result =
@@ -85,7 +85,7 @@ export class InstitutionsController {
   // ==========================================
 
   @Post()
-  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_INSTITUTION) // 🔥 ABAC
   @ApiOperation({ summary: 'Registra una nueva unidad educativa' })
   async create(
     @Body() createInstitutionDto: CreateInstitutionDto,
@@ -116,7 +116,7 @@ export class InstitutionsController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.INSTITUTION_WRITE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_INSTITUTION) // 🔥 ABAC
   @ApiOperation({ summary: 'Actualiza los datos del RUE' })
   async update(
     @Param('id') id: string,

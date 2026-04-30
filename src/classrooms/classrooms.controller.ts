@@ -20,7 +20,7 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { CreateBulkClassroomsDto } from './dto/create-bulk-classrooms.dto';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -34,7 +34,7 @@ export class ClassroomsController {
   constructor(private readonly classroomsService: ClassroomsService) {}
 
   @Post()
-  @RequirePermissions(SystemPermissions.CLASSROOMS_CREATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_CLASSROOM) // 🔥 ABAC: Solo Dirección
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Crea un nuevo curso/paralelo' })
   create(@Body() createClassroomDto: CreateClassroomDto) {
@@ -42,7 +42,7 @@ export class ClassroomsController {
   }
 
   @Post('bulk')
-  @RequirePermissions(SystemPermissions.CLASSROOMS_CREATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_CLASSROOM) // 🔥 ABAC: Solo Dirección
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Crea múltiples cursos masivamente' })
   createBulk(@Body() createBulkDto: CreateBulkClassroomsDto) {
@@ -50,7 +50,8 @@ export class ClassroomsController {
   }
 
   @Get()
-  // 🔓 Lectura abierta (Solo requiere JWT)
+  // 🔓 Lectura abierta (Solo requiere JWT). Los docentes necesitan ver los cursos
+  // para poder tomar asistencia o registrar notas.
   @ApiOperation({ summary: 'Obtiene el listado de cursos filtrado' })
   findAll(
     @Query()
@@ -71,7 +72,7 @@ export class ClassroomsController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.CLASSROOMS_UPDATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_CLASSROOM) // 🔥 ABAC: Solo Dirección
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualiza los datos o el tutor de un curso' })
   update(
@@ -82,7 +83,7 @@ export class ClassroomsController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.CLASSROOMS_DELETE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_CLASSROOM) // 🔥 ABAC: Solo Dirección
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina un curso (si no tiene alumnos)' })
   remove(@Param('id') id: string) {

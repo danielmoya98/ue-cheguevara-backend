@@ -20,7 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { SpaceType } from '../../prisma/generated/client';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -34,14 +34,15 @@ export class PhysicalSpacesController {
   constructor(private readonly physicalSpacesService: PhysicalSpacesService) {}
 
   @Post()
-  @RequirePermissions(SystemPermissions.PHYSICAL_SPACES_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_PHYSICAL_SPACE) // 🔥 ABAC: Solo personal autorizado
   @ApiOperation({ summary: 'Registra una nueva aula, laboratorio o cancha' })
   create(@Body() createPhysicalSpaceDto: CreatePhysicalSpaceDto) {
     return this.physicalSpacesService.create(createPhysicalSpaceDto);
   }
 
   @Get()
-  // 🔓 Sin @RequirePermissions: Lectura abierta para cualquier usuario logueado
+  // 🔓 Sin @RequirePermissions: Lectura abierta para cualquier usuario logueado.
+  // Los docentes necesitan ver las aulas para saber dónde dictar clases.
   @ApiOperation({ summary: 'Obtiene todos los espacios físicos' })
   @ApiQuery({ name: 'type', required: false, enum: SpaceType })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
@@ -64,7 +65,7 @@ export class PhysicalSpacesController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.PHYSICAL_SPACES_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_PHYSICAL_SPACE) // 🔥 ABAC
   @ApiOperation({ summary: 'Actualiza nombre, capacidad o estado' })
   update(
     @Param('id') id: string,
@@ -74,7 +75,7 @@ export class PhysicalSpacesController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.PHYSICAL_SPACES_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_PHYSICAL_SPACE) // 🔥 ABAC
   @ApiOperation({ summary: 'Elimina un espacio físico (Si no está en uso)' })
   remove(@Param('id') id: string) {
     return this.physicalSpacesService.remove(id);

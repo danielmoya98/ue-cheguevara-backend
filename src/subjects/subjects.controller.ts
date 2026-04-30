@@ -20,7 +20,7 @@ import { EducationLevel } from '../../prisma/generated/client';
 import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -34,7 +34,7 @@ export class SubjectsController {
   constructor(private readonly subjectsService: SubjectsService) {}
 
   @Post()
-  @RequirePermissions(SystemPermissions.SUBJECTS_WRITE) // 🔥 Solo Administradores
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_SUBJECT) // 🔥 ABAC: Solo Administradores autorizados
   @UseInterceptors(IdempotencyInterceptor) // Escudo Anti-rebotes
   @ApiOperation({ summary: 'Registra una nueva materia en el catálogo' })
   create(@Body() createSubjectDto: CreateSubjectDto) {
@@ -42,7 +42,7 @@ export class SubjectsController {
   }
 
   @Get()
-  // 🔓 Sin @RequirePermissions: Lectura abierta para usuarios logueados (útil para selects)
+  // 🔓 Sin @RequirePermissions: Lectura abierta para usuarios logueados (útil para selects en otros módulos)
   @ApiOperation({
     summary: 'Obtiene el listado de materias (soporta filtro por nivel)',
   })
@@ -58,7 +58,7 @@ export class SubjectsController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.SUBJECTS_WRITE) // 🔥 Solo Administradores
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_SUBJECT) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualiza los datos de una materia' })
   update(@Param('id') id: string, @Body() updateSubjectDto: UpdateSubjectDto) {
@@ -66,7 +66,7 @@ export class SubjectsController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.SUBJECTS_WRITE) // 🔥 Solo Administradores
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_SUBJECT) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina una materia del catálogo' })
   remove(@Param('id') id: string) {

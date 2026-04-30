@@ -24,7 +24,7 @@ import { IdempotencyInterceptor } from '../common/interceptors/idempotency.inter
 import { CacheTTL } from '@nestjs/cache-manager';
 import { UserProfileCacheInterceptor } from '../common/interceptors/user-profile-cache.interceptor';
 
-// 🔥 IMPORTACIONES SEGURIDAD
+// 🔥 IMPORTACIONES SEGURIDAD ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -73,7 +73,7 @@ export class UsersController {
   // =======================================================
 
   @Post()
-  @RequirePermissions(SystemPermissions.USERS_WRITE)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_USER) // 🔥 ABAC
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Crear un nuevo usuario' })
   create(@Body() createUserDto: CreateUserDto, @Req() req: any) {
@@ -81,14 +81,14 @@ export class UsersController {
   }
 
   @Get()
-  @RequirePermissions(SystemPermissions.USERS_READ)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_USER) // 🔥 ABAC
   @ApiOperation({ summary: 'Obtener lista de usuarios filtrada por jerarquía' })
   findAll(@Query() query: PaginationDto, @Req() req: any) {
     return this.usersService.findAll(query, req.user);
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.USERS_WRITE)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_USER) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualizar nombre o rol de un usuario' })
   update(
@@ -100,7 +100,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.USERS_WRITE)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_USER) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Desactivar un usuario (Soft Delete)' })
   remove(@Param('id') id: string, @Req() req: any) {
@@ -108,7 +108,7 @@ export class UsersController {
   }
 
   @Patch(':id/reactivate')
-  @RequirePermissions(SystemPermissions.USERS_WRITE)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_USER) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Reactivar a un usuario inactivo' })
   reactivate(@Param('id') id: string, @Req() req: any) {
@@ -116,7 +116,7 @@ export class UsersController {
   }
 
   @Post(':id/reset-password')
-  @RequirePermissions(SystemPermissions.USERS_WRITE)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_USER) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({ summary: 'Genera una nueva contraseña temporal' })

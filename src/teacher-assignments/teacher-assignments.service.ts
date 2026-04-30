@@ -15,7 +15,7 @@ export class TeacherAssignmentsService {
   constructor(private prisma: PrismaService) {}
 
   async create(data: CreateTeacherAssignmentDto) {
-    // 🔥 BUG CORREGIDO: Buscamos la relación role en lugar del enum estático
+    // Buscamos la relación role en lugar del enum estático
     const teacher = await this.prisma.user.findUnique({
       where: { id: data.teacherId },
       include: { role: true },
@@ -71,7 +71,7 @@ export class TeacherAssignmentsService {
 
     const result = await this.prisma.teacherAssignment.createMany({
       data: recordsToInsert,
-      skipDuplicates: true,
+      skipDuplicates: true, // Ignora si una materia ya está asignada en el curso destino
     });
 
     return {
@@ -94,12 +94,14 @@ export class TeacherAssignmentsService {
 
     let { academicYearId, classroomId, teacherId } = query;
 
-    // 🔥 REGLA ABAC CORREGIDA:
-    // Solo forzamos el filtro de teacherId si el usuario NO es Admin ni Director.
-    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    // 🔥 REGLA ABAC CORREGIDA: Evaluamos los permisos del usuario en lugar del rol estático.
+    const permissions = user.permissions || [];
+    const isPowerUser =
+      permissions.includes(SystemPermissions.MANAGE_ALL) ||
+      permissions.includes(SystemPermissions.MANAGE_ALL_TEACHER_ASSIGNMENT);
 
     if (!isPowerUser) {
-      // Si llega aquí, es un DOCENTE, por lo tanto solo ve su propia carga
+      // Si NO es Power User (es un DOCENTE u otro rol básico), solo ve su propia carga horaria.
       teacherId = user.userId;
     }
 
@@ -144,6 +146,7 @@ export class TeacherAssignmentsService {
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
     };
   }
+
   async remove(id: string) {
     const assignment = await this.prisma.teacherAssignment.findUnique({
       where: { id },
@@ -153,7 +156,7 @@ export class TeacherAssignmentsService {
       throw new NotFoundException('Asignación no encontrada');
     }
 
-    // 🔥 DEUDA TÉCNICA RESUELTA: Protección de Integridad (Calificaciones)
+    // 🛡️ Protección de Integridad (Calificaciones)
     const gradesCount = await this.prisma.grade.count({
       where: { teacherAssignmentId: id },
     });
@@ -164,7 +167,7 @@ export class TeacherAssignmentsService {
       );
     }
 
-    // 🔥 DEUDA TÉCNICA RESUELTA: Protección de Integridad (Horarios)
+    // 🛡️ Protección de Integridad (Horarios)
     const schedulesCount = await this.prisma.scheduleSlot.count({
       where: { teacherAssignmentId: id },
     });

@@ -12,7 +12,7 @@ import { TrimestersService } from './trimesters.service';
 import { UpdateTrimesterDto } from './dto/update-trimester.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -33,7 +33,7 @@ export class TrimestersController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.TRIMESTERS_WRITE) // 🔥 Solo Admin/Director
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_ACADEMIC_YEAR) // 🔥 ABAC CORREGIDO: Usando permiso del diccionario
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Actualiza fechas o abre/cierra un trimestre' })
   update(

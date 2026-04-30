@@ -9,24 +9,29 @@ import { CreateChangeRequestDto } from './dto/create-change-request.dto';
 import { ResolveChangeRequestDto } from './dto/resolve-change-request.dto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @Injectable()
 export class GradesService {
   constructor(
     private prisma: PrismaService,
-    // 🔥 Inyectamos la cola de notificaciones
     @InjectQueue('notifications-queue') private notificationsQueue: Queue,
   ) {}
 
   // ==========================================
-  // HELPER: ABAC - VERIFICAR PROPIEDAD DE MATERIA
+  // 🔥 HELPER: ABAC - VERIFICAR PROPIEDAD DE MATERIA
   // ==========================================
   private verifyAssignmentOwnership(assignment: any, user: any) {
-    // 🔥 ABAC CORREGIDO: Administradores y Directores tienen acceso global a auditoría
-    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    const permissions = user.permissions || [];
+
+    // ABAC: Si tiene permiso global de lectura/manejo, pasa directo (Director/Secretaría)
+    const isPowerUser =
+      permissions.includes(SystemPermissions.MANAGE_ALL) ||
+      permissions.includes(SystemPermissions.READ_ALL_GRADE);
+
     if (isPowerUser) return;
 
-    // Si no es Power User, entonces debe ser estrictamente el Docente dueño de la materia
+    // Si no es Power User, debe ser estrictamente el Docente dueño de la materia
     if (assignment.teacherId !== user.userId) {
       throw new ForbiddenException(
         'Privacidad: No tienes permiso para ver o alterar las calificaciones de una materia que no dictas.',
@@ -38,7 +43,6 @@ export class GradesService {
   // PILAR 3: INSERCIÓN CON REFORZAMIENTO Y LEY 070
   // ==========================================
   async upsertGrade(data: UpsertGradeDto, user: any) {
-    // 1. Validar que el Trimestre esté ABIERTO
     const trimester = await this.prisma.trimester.findUnique({
       where: { id: data.trimesterId },
     });
@@ -50,7 +54,6 @@ export class GradesService {
       );
     }
 
-    // 2. Validar que el estudiante y la asignación existan
     const enrollment = await this.prisma.enrollment.findUnique({
       where: { id: data.enrollmentId },
     });
@@ -62,10 +65,9 @@ export class GradesService {
     if (!assignment)
       throw new NotFoundException('Asignación docente no encontrada');
 
-    // 3. POLÍTICA ABAC
+    // Validación ABAC de propiedad
     this.verifyAssignmentOwnership(assignment, user);
 
-    // 4. Obtener nota actual
     const existingGrade = await this.prisma.grade.findUnique({
       where: {
         enrollmentId_teacherAssignmentId_trimesterId: {
@@ -76,7 +78,6 @@ export class GradesService {
       },
     });
 
-    // 5. MOTOR MATEMÁTICO: Calcular el Total
     const currentSer =
       data.scoreSer !== undefined
         ? data.scoreSer
@@ -113,7 +114,6 @@ export class GradesService {
         (currentHacer || 0) +
         (currentAuto || 0);
 
-      // 🔥 LÓGICA DE REFORZAMIENTO (LEY 070)
       if (totalScore >= 51) {
         currentRecovery = null;
         finalScore = totalScore;
@@ -126,7 +126,6 @@ export class GradesService {
       }
     }
 
-    // 6. Ejecutar UPSERT
     const savedGrade = await this.prisma.grade.upsert({
       where: {
         enrollmentId_teacherAssignmentId_trimesterId: {
@@ -162,7 +161,6 @@ export class GradesService {
       },
     });
 
-    // 🔥 7. EL ANALISTA AUTOMÁTICO (Disparador de BullMQ)
     if (
       savedGrade.finalScore !== null &&
       savedGrade.finalScore < 51 &&
@@ -195,7 +193,6 @@ export class GradesService {
 
     if (!assignment) throw new NotFoundException('Asignación no encontrada');
 
-    // 🔥 Pasa por la validación ABAC actualizada (El Director ahora sí pasa este filtro)
     this.verifyAssignmentOwnership(assignment, user);
 
     const enrollments = await this.prisma.enrollment.findMany({
@@ -234,7 +231,6 @@ export class GradesService {
   // PILAR 2: CHANGE REQUESTS (DESCONGELAMIENTO)
   // ==========================================
 
-  // 1. El Profesor solicita el cambio
   async createChangeRequest(data: CreateChangeRequestDto, user: any) {
     const grade = await this.prisma.grade.findUnique({
       where: { id: data.gradeId },
@@ -244,7 +240,6 @@ export class GradesService {
     if (!grade)
       throw new NotFoundException('Calificación original no encontrada');
 
-    // Verificamos que el profesor que pide el cambio sea el dueño de la materia
     this.verifyAssignmentOwnership(grade.teacherAssignment, user);
 
     return await this.prisma.gradeChangeRequest.create({
@@ -261,7 +256,6 @@ export class GradesService {
     });
   }
 
-  // 2. El Director lista las solicitudes pendientes
   async getPendingRequests() {
     return await this.prisma.gradeChangeRequest.findMany({
       where: { status: 'PENDING' },
@@ -278,7 +272,6 @@ export class GradesService {
     });
   }
 
-  // 3. El Director aprueba o rechaza
   async resolveChangeRequest(
     requestId: string,
     data: ResolveChangeRequestDto,
@@ -294,17 +287,15 @@ export class GradesService {
       throw new ForbiddenException('Esta solicitud ya fue resuelta');
 
     return await this.prisma.$transaction(async (tx) => {
-      // 1. Marcamos la solicitud como resuelta
       const resolvedReq = await tx.gradeChangeRequest.update({
         where: { id: requestId },
         data: {
           status: data.status,
-          approvedById: user.userId, // El Director que aprobó o rechazó
+          approvedById: user.userId,
           resolvedAt: new Date(),
         },
       });
 
-      // 2. Si el Director APRUEBA, aplicamos los cambios en la nota real
       if (data.status === 'APPROVED') {
         const { grade } = request;
 
@@ -338,7 +329,7 @@ export class GradesService {
             totalScore,
             recoveryScore,
             finalScore,
-            lastModifiedById: user.userId, // Refleja que el Director forzó la actualización
+            lastModifiedById: user.userId,
             status: 'PUBLISHED',
           },
         });

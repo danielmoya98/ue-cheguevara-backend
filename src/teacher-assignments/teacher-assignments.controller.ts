@@ -19,7 +19,7 @@ import { PaginationDto } from '../common/dto/pagination.dto';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
 import { CloneAssignmentsDto } from './dto/clone-assignments.dto';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -35,7 +35,7 @@ export class TeacherAssignmentsController {
   ) {}
 
   @Post()
-  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TEACHER_ASSIGNMENT) // 🔥 ABAC
   @UseInterceptors(IdempotencyInterceptor)
   @ApiOperation({
     summary: 'Asigna un docente a una materia en un curso específico',
@@ -45,7 +45,7 @@ export class TeacherAssignmentsController {
   }
 
   @Post('clone')
-  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TEACHER_ASSIGNMENT) // 🔥 ABAC
   @UseInterceptors(IdempotencyInterceptor)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
@@ -56,7 +56,7 @@ export class TeacherAssignmentsController {
   }
 
   @Get()
-  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_READ)
+  // 🔓 Sin @RequirePermissions: La ruta está abierta para logueados, pero el Servicio filtra los datos.
   @ApiOperation({ summary: 'Obtiene el listado de carga horaria' })
   findAll(
     @Query()
@@ -72,7 +72,7 @@ export class TeacherAssignmentsController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.TEACHER_ASSIGNMENTS_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TEACHER_ASSIGNMENT) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Elimina una asignación de carga horaria' })
   remove(@Param('id') id: string) {

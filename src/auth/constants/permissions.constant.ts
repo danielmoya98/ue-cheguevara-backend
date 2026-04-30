@@ -22,6 +22,7 @@ export enum SystemPermissions {
   // ATTENDANCE (Asistencia)
   READ_ALL_ATTENDANCE = 'read:all:Attendance',
   CREATE_OWN_ATTENDANCE = 'create:own:Attendance',
+  MANAGE_ALL_ATTENDANCE = 'manage:all:Attendance', // 🔥 Añade este para justificar faltas y escáner
 
   // GRADE (Calificaciones)
   READ_ALL_GRADE = 'read:all:Grade',
@@ -45,6 +46,9 @@ export enum SystemPermissions {
   MANAGE_ALL_ROLE = 'manage:all:Role',
   MANAGE_ALL_INSTITUTION = 'manage:all:Institution',
   READ_ALL_AUDIT = 'read:all:Audit',
+
+  // GUARDIANS (App Móvil)
+  READ_OWN_GUARDIAN = 'read:own:Guardian', // 🔥 Permiso exclusivo para Padres
 }
 
 // Mantenemos tu tipo original para que el decorador no explote

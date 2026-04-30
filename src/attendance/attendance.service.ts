@@ -45,12 +45,20 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // HELPER: ABAC - VERIFICAR PROPIEDAD DEL CURSO
+  // 🔥 HELPER: ABAC - VERIFICAR PROPIEDAD DEL CURSO
   // ==========================================
   private async verifyTeacherClassroomAccess(user: any, classroomId: string) {
-    const isPowerUser = user.role === 'SUPER_ADMIN' || user.role === 'DIRECTOR';
+    const permissions = user.permissions || [];
+
+    // Si tiene control total o acceso de lectura a toda la asistencia, lo dejamos pasar
+    const isPowerUser =
+      permissions.includes('manage:all:all') ||
+      permissions.includes('read:all:Attendance') ||
+      permissions.includes('manage:all:Attendance');
+
     if (isPowerUser) return;
 
+    // Si no es admin, verificamos que sea el docente de este curso
     const isAssigned = await this.prisma.teacherAssignment.findFirst({
       where: { classroomId: classroomId, teacherId: user.userId },
     });
@@ -63,19 +71,13 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // 👨‍🏫 RUTAS DEL DOCENTE (Nuevas funciones)
-  // ==========================================
-
-  // ==========================================
-  // 👨‍🏫 RUTAS DEL DOCENTE (Corregido para tu Schema)
+  // 👨‍🏫 RUTAS DEL DOCENTE
   // ==========================================
 
   async getDailySchedule(date: string, user: any) {
     const targetDate = new Date(date);
-
     const dayOfWeek = targetDate.getUTCDay();
 
-    // 🔥 Usamos scheduleSlot en lugar de timetable
     return this.prisma.scheduleSlot.findMany({
       where: {
         dayOfWeek: dayOfWeek,
@@ -85,11 +87,12 @@ export class AttendanceService {
         classPeriod: true,
         classroom: true,
         teacherAssignment: { include: { subject: true } },
-        physicalSpace: true, // Opcional, pero útil si quieres saber en qué aula física les toca
+        physicalSpace: true,
       },
       orderBy: { classPeriod: { startTime: 'asc' } },
     });
   }
+
   async getClassroomAttendance(
     classroomId: string,
     classPeriodId: string,
@@ -101,7 +104,6 @@ export class AttendanceService {
     const targetDate = new Date(date);
     const dateOnly = new Date(targetDate.toISOString().split('T')[0]);
 
-    // 1. Traer a todos los inscritos del curso
     const enrollments = await this.prisma.enrollment.findMany({
       where: { classroomId, status: 'INSCRITO' },
       include: { student: true },
@@ -111,7 +113,6 @@ export class AttendanceService {
       ],
     });
 
-    // 2. Traer los registros de asistencia que ya existan para hoy en esa hora
     const records = await this.prisma.attendanceRecord.findMany({
       where: {
         classPeriodId,
@@ -120,13 +121,12 @@ export class AttendanceService {
       },
     });
 
-    // 3. Fusionar datos
     return enrollments.map((enrollment) => {
       const record = records.find((r) => r.enrollmentId === enrollment.id);
       return {
         enrollmentId: enrollment.id,
         student: enrollment.student,
-        record: record || null, // Nulo si aún no han marcado
+        record: record || null,
       };
     });
   }
@@ -143,7 +143,6 @@ export class AttendanceService {
     if (!institution)
       throw new InternalServerErrorException('Reglas no configuradas');
 
-    // Ejecutamos todos los upserts en una sola transacción SQL
     const results = await this.prisma.$transaction(
       bulkData.records.map((record: any) =>
         this.prisma.attendanceRecord.upsert({
@@ -173,7 +172,6 @@ export class AttendanceService {
       ),
     );
 
-    // Disparamos notificaciones Push asíncronas para cada registro
     bulkData.records.forEach((record: any) => {
       this.processSmartNotification(
         record.enrollmentId,
@@ -283,7 +281,7 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // 🔥 MONITOR EN VIVO (Admin y Docentes)
+  // 🔥 MONITOR EN VIVO
   // ==========================================
   async getDailyMonitor(
     dto: { classroomId: string; classPeriodId: string; date?: string },
@@ -352,7 +350,7 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // 🛠️ EL PLAN B: MARCADO MANUAL (Upsert)
+  // 🛠️ EL PLAN B: MARCADO MANUAL
   // ==========================================
   async markManualAttendance(
     dto: import('./dto/manual-attendance.dto').ManualAttendanceDto,
@@ -448,45 +446,7 @@ export class AttendanceService {
     });
   }
 
-  async createPreemptiveExcuse(
-    dto: {
-      enrollmentId: string;
-      classPeriodId: string;
-      date: string;
-      reason: string;
-    },
-    user: any,
-  ) {
-    const dateOnly = new Date(dto.date);
-
-    return this.prisma.attendanceRecord.upsert({
-      where: {
-        enrollmentId_classPeriodId_date: {
-          enrollmentId: dto.enrollmentId,
-          classPeriodId: dto.classPeriodId,
-          date: dateOnly,
-        },
-      },
-      update: {
-        status: AttendanceStatus.EXCUSED,
-        justification: dto.reason,
-        markedById: user.userId,
-      },
-      create: {
-        enrollmentId: dto.enrollmentId,
-        classPeriodId: dto.classPeriodId,
-        date: dateOnly,
-        status: AttendanceStatus.EXCUSED,
-        justification: dto.reason,
-        markedById: user.userId,
-        method: AttendanceMethod.MANUAL,
-      },
-    });
-  }
-
-  // ==========================================
-  // MÉTODOS PRIVADOS DE AYUDA
-  // ==========================================
+  // Resto de Helpers (Sin cambios funcionales)...
   private calculateAttendanceStatus(
     startTimeStr: string,
     lateTol: number,
@@ -524,9 +484,6 @@ export class AttendanceService {
     };
   }
 
-  // ==========================================
-  // 🧠 EL CEREBRO OMNICANAL DE NOTIFICACIONES PUSH
-  // ==========================================
   private async processSmartNotification(
     enrollmentId: string,
     status: AttendanceStatus,

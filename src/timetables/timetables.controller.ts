@@ -18,9 +18,8 @@ import { CreateScheduleSlotDto } from './dto/create-schedule-slot.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 import { Shift } from '../../prisma/generated/client';
 import { IdempotencyInterceptor } from '../common/interceptors/idempotency.interceptor';
-import express from 'express';
-
-// 🔥 IMPORTACIONES RBAC
+import type { Response } from 'express'; // 🔥 CORRECCIÓN: 'import type' para interfaces
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -34,7 +33,7 @@ export class TimetablesController {
   constructor(private readonly timetablesService: TimetablesService) {}
 
   @Get('periods')
-  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
+  // 🔓 Sin @RequirePermissions: Lectura abierta para poder armar la grilla en el Frontend
   @ApiOperation({
     summary: 'Obtiene la estructura base de los periodos según el turno',
   })
@@ -43,7 +42,7 @@ export class TimetablesController {
   }
 
   @Get('classroom/:id')
-  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
+  // 🔓 Lectura abierta: Docentes y alumnos necesitan ver el horario
   @ApiOperation({
     summary: 'Obtiene todos los casilleros ocupados por un curso',
   })
@@ -52,7 +51,7 @@ export class TimetablesController {
   }
 
   @Post('slot')
-  @RequirePermissions(SystemPermissions.TIMETABLES_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC: Solo Gestores
   @UseInterceptors(IdempotencyInterceptor)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Asigna una materia a un casillero' })
@@ -61,7 +60,7 @@ export class TimetablesController {
   }
 
   @Delete('slot/:id')
-  @RequirePermissions(SystemPermissions.TIMETABLES_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC: Solo Gestores
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Libera un casillero' })
   removeSlot(@Param('id') id: string) {
@@ -73,17 +72,14 @@ export class TimetablesController {
   // ==============================================
 
   @Get('export/pdf/:classroomId')
-  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
+  // 🔓 Lectura abierta: Cualquiera puede descargar el PDF de un curso específico
   @ApiOperation({ summary: 'Descarga el horario de un curso en PDF' })
-  exportPdf(
-    @Param('classroomId') classroomId: string,
-    @Res() res: express.Response,
-  ) {
+  exportPdf(@Param('classroomId') classroomId: string, @Res() res: Response) {
     return this.timetablesService.exportSinglePdf(classroomId, res);
   }
 
   @Post('export/zip/start/:academicYearId')
-  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC: Acción pesada, solo Administradores
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({ summary: 'Añade la generación de ZIP a la cola (Asíncrono)' })
   startZipExport(@Param('academicYearId') academicYearId: string) {
@@ -91,17 +87,14 @@ export class TimetablesController {
   }
 
   @Get('export/zip/download/:fileName')
-  @RequirePermissions(SystemPermissions.TIMETABLES_READ) // 🔥 RBAC
+  // 🔓 Abierto temporalmente mediante token de descarga, o protegido si el frontend inyecta la cookie
   @ApiOperation({ summary: 'Descarga un ZIP ya generado por el Worker' })
-  downloadZip(
-    @Param('fileName') fileName: string,
-    @Res() res: express.Response,
-  ) {
+  downloadZip(@Param('fileName') fileName: string, @Res() res: Response) {
     return this.timetablesService.downloadZip(fileName, res);
   }
 
   @Patch('slot/:id/space')
-  @RequirePermissions(SystemPermissions.TIMETABLES_WRITE) // 🔥 Solo Admin
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC: Solo Gestores
   @ApiOperation({
     summary: 'Cambia el aula física de una materia específica en el horario',
   })

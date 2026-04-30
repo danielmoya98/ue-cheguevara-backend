@@ -17,7 +17,7 @@ import { GetMonitorDto } from './dto/get-monitor.dto';
 import { ManualAttendanceDto } from './dto/manual-attendance.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -31,18 +31,18 @@ export class AttendanceController {
   constructor(private readonly attendanceService: AttendanceService) {}
 
   // ==========================================
-  // 👨‍🏫 RUTAS DEL DOCENTE (Nuevas)
+  // 👨‍🏫 RUTAS DEL DOCENTE
   // ==========================================
 
   @Get('schedule')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @RequirePermissions(SystemPermissions.READ_OWN_TIMETABLE) // 🔥 ABAC
   @ApiOperation({ summary: 'Obtiene el horario del día para tomar asistencia' })
   async getDailySchedule(@Query('date') date: string, @Req() req: any) {
     return this.attendanceService.getDailySchedule(date, req.user);
   }
 
   @Get('classroom')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @RequirePermissions(SystemPermissions.CREATE_OWN_ATTENDANCE) // 🔥 ABAC
   @ApiOperation({ summary: 'Obtiene alumnos y estado actual de asistencia' })
   async getClassroomAttendance(
     @Query('classroomId') classroomId: string,
@@ -59,7 +59,7 @@ export class AttendanceController {
   }
 
   @Post('bulk')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
+  @RequirePermissions(SystemPermissions.CREATE_OWN_ATTENDANCE) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Guarda la asistencia masiva de un curso' })
   async saveBulkAttendance(@Body() bulkData: any, @Req() req: any) {
@@ -67,11 +67,14 @@ export class AttendanceController {
   }
 
   // ==========================================
-  // 🛡️ RUTAS DEL DIRECTOR / SECRETARÍA (Intactas)
+  // 🛡️ RUTAS DEL DIRECTOR / SECRETARÍA
   // ==========================================
 
   @Post('scan')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
+  @RequirePermissions(
+    SystemPermissions.CREATE_OWN_ATTENDANCE,
+    SystemPermissions.MANAGE_ALL_ATTENDANCE,
+  ) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Registra asistencia mediante escaneo QR' })
   async scanQR(@Body() dto: RegisterAttendanceDto, @Req() req: any) {
@@ -79,7 +82,7 @@ export class AttendanceController {
   }
 
   @Get('monitor')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @RequirePermissions(SystemPermissions.READ_ALL_ATTENDANCE) // 🔥 ABAC
   @ApiOperation({
     summary:
       'Obtiene la lista de alumnos de un curso y su estado de asistencia',
@@ -89,7 +92,7 @@ export class AttendanceController {
   }
 
   @Post('manual')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_WRITE)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_ATTENDANCE) // 🔥 ABAC
   @ApiOperation({
     summary: 'Marca o corrige la asistencia manualmente (Plan B)',
   })
@@ -101,7 +104,7 @@ export class AttendanceController {
   }
 
   @Get('history/:enrollmentId')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_READ)
+  @RequirePermissions(SystemPermissions.READ_ALL_ATTENDANCE) // 🔥 ABAC
   @ApiOperation({
     summary: 'Obtiene historial de faltas/atrasos para justificar',
   })
@@ -116,7 +119,7 @@ export class AttendanceController {
   }
 
   @Patch('justify/:id')
-  @RequirePermissions(SystemPermissions.ATTENDANCE_JUSTIFY)
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_ATTENDANCE) // 🔥 ABAC
   @ApiOperation({ summary: 'Convierte una falta/atraso en Licencia (EXCUSED)' })
   async justify(
     @Param('id') id: string,

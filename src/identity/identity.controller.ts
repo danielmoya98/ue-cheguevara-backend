@@ -11,7 +11,7 @@ import {
 import { IdentityService } from './identity.service';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -25,14 +25,17 @@ export class IdentityController {
   constructor(private readonly identityService: IdentityService) {}
 
   @Get('qr/:studentId')
-  @RequirePermissions(SystemPermissions.IDENTITY_READ) // 🔥 RBAC
+  @RequirePermissions(
+    SystemPermissions.READ_ALL_STUDENT,
+    SystemPermissions.CREATE_ANY_IDENTITY,
+  ) // 🔥 ABAC
   @ApiOperation({ summary: 'Obtiene el estado y el QR del alumno' })
   async getStudentQR(@Param('studentId') studentId: string) {
     return this.identityService.getStudentQR(studentId);
   }
 
   @Post('generate/:studentId')
-  @RequirePermissions(SystemPermissions.IDENTITY_WRITE) // 🔥 RBAC
+  @RequirePermissions(SystemPermissions.CREATE_ANY_IDENTITY) // 🔥 ABAC
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Genera y activa un nuevo QR para el estudiante' })
   async generateNewQR(@Param('studentId') studentId: string) {
@@ -40,7 +43,7 @@ export class IdentityController {
   }
 
   @Post('revoke/:studentId')
-  @RequirePermissions(SystemPermissions.IDENTITY_WRITE) // 🔥 RBAC
+  @RequirePermissions(SystemPermissions.CREATE_ANY_IDENTITY) // 🔥 ABAC
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Revoca el QR actual de un estudiante' })
   async revokeQR(@Param('studentId') studentId: string) {
@@ -48,7 +51,7 @@ export class IdentityController {
   }
 
   @Post('export/mass/:academicYearId')
-  @RequirePermissions(SystemPermissions.IDENTITY_EXPORT) // 🔥 RBAC
+  @RequirePermissions(SystemPermissions.CREATE_ANY_IDENTITY) // 🔥 ABAC
   @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Inicia la generación asíncrona de ZIP con carnets',

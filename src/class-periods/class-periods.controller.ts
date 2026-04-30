@@ -20,7 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { Shift } from '../../prisma/generated/client';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -29,12 +29,12 @@ import { SystemPermissions } from '../auth/constants/permissions.constant';
 @ApiTags('Periodos de Clase (Campanario)')
 @ApiCookieAuth('uecg_access_token')
 @Controller('class-periods')
-@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Nuevo Escudo Activado
+@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo de Seguridad Activado
 export class ClassPeriodsController {
   constructor(private readonly classPeriodsService: ClassPeriodsService) {}
 
   @Post()
-  @RequirePermissions(SystemPermissions.CLASS_PERIODS_CREATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC: Solo el Director (Arquitecto)
   @ApiOperation({ summary: 'Crea un nuevo bloque de hora o recreo' })
   async create(@Body() createClassPeriodDto: CreateClassPeriodDto) {
     const data = await this.classPeriodsService.create(createClassPeriodDto);
@@ -42,7 +42,8 @@ export class ClassPeriodsController {
   }
 
   @Get()
-  // 🔓 Sin @RequirePermissions. Cualquier usuario autenticado puede leer los periodos.
+  // 🔓 ABAC: Sin @RequirePermissions. Cualquier usuario logueado (Docentes/Director)
+  // necesita leer las horas para saber su horario y tomar asistencia.
   @ApiOperation({ summary: 'Obtiene la lista de horas de clase' })
   @ApiQuery({ name: 'shift', enum: Shift, required: false })
   async findAll(@Query('shift') shift?: Shift) {
@@ -51,7 +52,7 @@ export class ClassPeriodsController {
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.CLASS_PERIODS_UPDATE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC
   @ApiOperation({ summary: 'Actualiza una hora específica' })
   async update(
     @Param('id') id: string,
@@ -65,7 +66,7 @@ export class ClassPeriodsController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.CLASS_PERIODS_DELETE) // 🔥 Control RBAC
+  @RequirePermissions(SystemPermissions.MANAGE_ALL_TIMETABLE) // 🔥 ABAC
   @ApiOperation({ summary: 'Elimina un periodo (Solo si no está en uso)' })
   async remove(@Param('id') id: string) {
     return this.classPeriodsService.remove(id);

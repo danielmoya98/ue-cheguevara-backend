@@ -17,7 +17,7 @@ import { CreateChangeRequestDto } from './dto/create-change-request.dto';
 import { ResolveChangeRequestDto } from './dto/resolve-change-request.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES RBAC
+// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -31,7 +31,11 @@ export class GradesController {
   constructor(private readonly gradesService: GradesService) {}
 
   @Put()
-  @RequirePermissions(SystemPermissions.GRADES_WRITE) // 🔥 RBAC
+  // 🔥 ABAC: Cualquiera con permiso de escribir notas (Docente o Admin)
+  @RequirePermissions(
+    SystemPermissions.UPDATE_OWN_GRADE,
+    SystemPermissions.MANAGE_ALL,
+  )
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ingresa o actualiza la nota de un estudiante' })
   upsertGrade(@Body() upsertGradeDto: UpsertGradeDto, @Req() req: any) {
@@ -39,7 +43,11 @@ export class GradesController {
   }
 
   @Get('assignment/:assignmentId/trimester/:trimesterId')
-  @RequirePermissions(SystemPermissions.GRADES_READ) // 🔥 RBAC
+  // 🔥 ABAC: Lectura global (Admin) o lectura propia (Docente)
+  @RequirePermissions(
+    SystemPermissions.READ_ALL_GRADE,
+    SystemPermissions.UPDATE_OWN_GRADE,
+  )
   @ApiOperation({
     summary: 'Obtiene la planilla de notas de un curso para una materia',
   })
@@ -60,7 +68,7 @@ export class GradesController {
   // ==========================================
 
   @Post('change-requests')
-  @RequirePermissions(SystemPermissions.GRADES_WRITE)
+  @RequirePermissions(SystemPermissions.UPDATE_OWN_GRADE) // 🔥 ABAC: Acción exclusiva del Docente
   @ApiOperation({
     summary: 'Profesor solicita corrección de nota en trimestre cerrado',
   })
@@ -69,7 +77,7 @@ export class GradesController {
   }
 
   @Get('change-requests/pending')
-  @RequirePermissions(SystemPermissions.GRADES_WRITE) // Para el Director
+  @RequirePermissions(SystemPermissions.READ_ALL_GRADE) // 🔥 ABAC: Para el Director
   @ApiOperation({
     summary: 'Director lista solicitudes pendientes de corrección',
   })
@@ -78,7 +86,7 @@ export class GradesController {
   }
 
   @Patch('change-requests/:id/resolve')
-  @RequirePermissions(SystemPermissions.GRADES_WRITE) // Para el Director
+  @RequirePermissions(SystemPermissions.MANAGE_ALL) // 🔥 ABAC: Para el Director
   @ApiOperation({
     summary: 'Director aprueba o rechaza solicitud de corrección',
   })
