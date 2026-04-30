@@ -23,6 +23,7 @@ import { ClassPeriodsModule } from './class-periods/class-periods.module';
 import { GradesModule } from './grades/grades.module';
 import { TrimestersModule } from './trimesters/trimesters.module';
 import { AuditModule } from './audit/audit.module';
+import { DashboardModule } from './dashboard/dashboard.module'; // 👈 Tu nuevo import
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { AuditModule } from './audit/audit.module';
     GradesModule,
     TrimestersModule,
     AuditModule,
+    DashboardModule,
   ],
   controllers: [AppController],
   providers: [AppService],
