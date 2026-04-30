@@ -42,6 +42,28 @@ export class GradesController {
     return this.gradesService.upsertGrade(upsertGradeDto, req.user);
   }
 
+  // 🔥 NUEVO: GUARDADO MASIVO PARA LA PLANILLA ENTERA
+  @Patch('bulk')
+  @RequirePermissions(
+    SystemPermissions.UPDATE_OWN_GRADE,
+    SystemPermissions.MANAGE_ALL,
+  )
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Guarda o actualiza masivamente la planilla de notas',
+  })
+  updateBulkGrades(
+    @Body()
+    body: {
+      teacherAssignmentId: string;
+      trimesterId: string;
+      grades: UpsertGradeDto[];
+    },
+    @Req() req: any,
+  ) {
+    return this.gradesService.updateBulkGrades(body, req.user);
+  }
+
   @Get('assignment/:assignmentId/trimester/:trimesterId')
   // 🔥 ABAC: Lectura global (Admin) o lectura propia (Docente)
   @RequirePermissions(

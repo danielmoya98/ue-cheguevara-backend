@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertGradeDto } from './dto/upsert-grade.dto';
@@ -27,7 +28,8 @@ export class GradesService {
     // ABAC: Si tiene permiso global de lectura/manejo, pasa directo (Director/Secretaría)
     const isPowerUser =
       permissions.includes(SystemPermissions.MANAGE_ALL) ||
-      permissions.includes(SystemPermissions.READ_ALL_GRADE);
+      permissions.includes(SystemPermissions.READ_ALL_GRADE) ||
+      permissions.includes(SystemPermissions.UPDATE_ALL_STUDENT);
 
     if (isPowerUser) return;
 
@@ -40,7 +42,7 @@ export class GradesService {
   }
 
   // ==========================================
-  // PILAR 3: INSERCIÓN CON REFORZAMIENTO Y LEY 070
+  // PILAR 3: INSERCIÓN INDIVIDUAL (REFORZAMIENTO Y LEY 070)
   // ==========================================
   async upsertGrade(data: UpsertGradeDto, user: any) {
     const trimester = await this.prisma.trimester.findUnique({
@@ -181,6 +183,143 @@ export class GradesService {
     return savedGrade;
   }
 
+  // 🔥 NUEVO: INSERCIÓN MASIVA (Usa la misma matemática pero en bloque)
+  async updateBulkGrades(
+    data: {
+      teacherAssignmentId: string;
+      trimesterId: string;
+      grades: UpsertGradeDto[];
+    },
+    user: any,
+  ) {
+    const trimester = await this.prisma.trimester.findUnique({
+      where: { id: data.trimesterId },
+    });
+
+    if (!trimester) throw new NotFoundException('Trimestre no encontrado');
+    if (!trimester.isOpen) {
+      throw new ForbiddenException(
+        'El trimestre actual se encuentra cerrado. Comuníquese con Dirección para solicitar una corrección.',
+      );
+    }
+
+    const assignment = await this.prisma.teacherAssignment.findUnique({
+      where: { id: data.teacherAssignmentId },
+    });
+    if (!assignment)
+      throw new NotFoundException('Asignación docente no encontrada');
+
+    // Validación ABAC de propiedad
+    this.verifyAssignmentOwnership(assignment, user);
+
+    let updatedCount = 0;
+
+    // Transacción masiva
+    await this.prisma.$transaction(async (tx) => {
+      for (const gradeItem of data.grades) {
+        // Obtener la nota actual (si existe) dentro de la transacción
+        const existingGrade = await tx.grade.findUnique({
+          where: {
+            enrollmentId_teacherAssignmentId_trimesterId: {
+              enrollmentId: gradeItem.enrollmentId,
+              teacherAssignmentId: data.teacherAssignmentId,
+              trimesterId: data.trimesterId,
+            },
+          },
+        });
+
+        const currentSer =
+          gradeItem.scoreSer !== undefined
+            ? gradeItem.scoreSer
+            : (existingGrade?.scoreSer ?? null);
+        const currentSaber =
+          gradeItem.scoreSaber !== undefined
+            ? gradeItem.scoreSaber
+            : (existingGrade?.scoreSaber ?? null);
+        const currentHacer =
+          gradeItem.scoreHacer !== undefined
+            ? gradeItem.scoreHacer
+            : (existingGrade?.scoreHacer ?? null);
+        const currentAuto =
+          gradeItem.scoreAuto !== undefined
+            ? gradeItem.scoreAuto
+            : (existingGrade?.scoreAuto ?? null);
+        let currentRecovery =
+          gradeItem.recoveryScore !== undefined
+            ? gradeItem.recoveryScore
+            : (existingGrade?.recoveryScore ?? null);
+
+        let totalScore: number | null = null;
+        let finalScore: number | null = null;
+
+        if (
+          currentSer !== null ||
+          currentSaber !== null ||
+          currentHacer !== null ||
+          currentAuto !== null
+        ) {
+          totalScore =
+            (currentSer || 0) +
+            (currentSaber || 0) +
+            (currentHacer || 0) +
+            (currentAuto || 0);
+
+          if (totalScore >= 51) {
+            currentRecovery = null;
+            finalScore = totalScore;
+          } else {
+            if (currentRecovery !== null) {
+              finalScore = Math.min(currentRecovery, 51);
+            } else {
+              finalScore = totalScore;
+            }
+          }
+        }
+
+        await tx.grade.upsert({
+          where: {
+            enrollmentId_teacherAssignmentId_trimesterId: {
+              enrollmentId: gradeItem.enrollmentId,
+              teacherAssignmentId: data.teacherAssignmentId,
+              trimesterId: data.trimesterId,
+            },
+          },
+          update: {
+            scoreSer: currentSer,
+            scoreSaber: currentSaber,
+            scoreHacer: currentHacer,
+            scoreAuto: currentAuto,
+            totalScore,
+            recoveryScore: currentRecovery,
+            finalScore,
+            status: gradeItem.status || existingGrade?.status,
+            lastModifiedById: user.userId,
+          },
+          create: {
+            enrollmentId: gradeItem.enrollmentId,
+            teacherAssignmentId: data.teacherAssignmentId,
+            trimesterId: data.trimesterId,
+            scoreSer: currentSer,
+            scoreSaber: currentSaber,
+            scoreHacer: currentHacer,
+            scoreAuto: currentAuto,
+            totalScore,
+            recoveryScore: currentRecovery,
+            finalScore,
+            status: gradeItem.status || 'DRAFT',
+            lastModifiedById: user.userId,
+          },
+        });
+        updatedCount++;
+      }
+    });
+
+    return {
+      message: `Se guardaron las calificaciones de ${updatedCount} estudiantes.`,
+    };
+  }
+
+  // OBTENER LA PLANILLA
   async getGradesByAssignment(
     teacherAssignmentId: string,
     trimesterId: string,
