@@ -11,6 +11,7 @@ import {
   HttpCode,
   HttpStatus,
   UseInterceptors,
+  Req,
 } from '@nestjs/common';
 import { ClassroomsService } from './classrooms.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
@@ -50,8 +51,7 @@ export class ClassroomsController {
   }
 
   @Get()
-  // 🔓 Lectura abierta (Solo requiere JWT). Los docentes necesitan ver los cursos
-  // para poder tomar asistencia o registrar notas.
+  // 🔓 Lectura abierta. Pero le pasamos req.user para que el servicio filtre qué cursos puede ver el docente.
   @ApiOperation({ summary: 'Obtiene el listado de cursos filtrado' })
   findAll(
     @Query()
@@ -60,8 +60,9 @@ export class ClassroomsController {
       level?: string;
       shift?: string;
     },
+    @Req() req: any, // 🔥 Inyectamos el usuario
   ) {
-    return this.classroomsService.findAll(query);
+    return this.classroomsService.findAll(query, req.user);
   }
 
   @Get(':id')

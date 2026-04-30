@@ -8,6 +8,7 @@ import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { Prisma } from '../../prisma/generated/client';
 import { EncryptionService } from '../common/services/encryption.service';
+import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @Injectable()
 export class EnrollmentsService {
@@ -15,6 +16,29 @@ export class EnrollmentsService {
     private prisma: PrismaService,
     private encryptionService: EncryptionService,
   ) {}
+
+  // ==========================================
+  // 🔥 HELPER: FILTRO ABAC INTELIGENTE
+  // ==========================================
+  private getAbacScope(user: any): Prisma.EnrollmentWhereInput {
+    const permissions = user?.permissions || [];
+    const isPowerUser =
+      permissions.includes(SystemPermissions.MANAGE_ALL) ||
+      permissions.includes(SystemPermissions.UPDATE_ALL_STUDENT); // Administradores
+
+    if (isPowerUser) return {};
+
+    // Si es docente, solo ve estudiantes de los cursos donde enseña o es asesor
+    // CORRECCIÓN: Usamos subjectAssignments en lugar de teacherAssignments
+    return {
+      classroom: {
+        OR: [
+          { advisorId: user.userId },
+          { subjectAssignments: { some: { teacherId: user.userId } } },
+        ],
+      },
+    };
+  }
 
   async create(createEnrollmentDto: any) {
     const payload = createEnrollmentDto;
@@ -172,11 +196,8 @@ export class EnrollmentsService {
     });
   }
 
-  // 🔥 BUSCADOR (100% PURO - SIN ROLES EN CÓDIGO)
-  async findAll(
-    query: QueryEnrollmentDto,
-    policyScope: Prisma.EnrollmentWhereInput,
-  ) {
+  // 🔥 BUSCADOR ABAC (SE LE PASA EL USUARIO EN VEZ DE LA POLÍTICA)
+  async findAll(query: QueryEnrollmentDto, user: any) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
     const skip = (page - 1) * limit;
@@ -197,7 +218,8 @@ export class EnrollmentsService {
       ? this.encryptionService.generateBlindIndex(search)
       : null;
 
-    // 🔥 FUSIONAMOS EL FILTRO DEL USUARIO CON EL ALCANCE DE LA POLÍTICA
+    const policyScope = this.getAbacScope(user); // 🔥 Generamos el scope aquí adentro
+
     const whereCondition: Prisma.EnrollmentWhereInput = {
       AND: [
         policyScope,
@@ -287,8 +309,10 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 DETALLE COMPLETO (PURO)
-  async findOne(id: string, policyScope: Prisma.EnrollmentWhereInput) {
+  // 🔥 DETALLE COMPLETO (Recibe el user)
+  async findOne(id: string, user: any) {
+    const policyScope = this.getAbacScope(user);
+
     const enrollment = await this.prisma.enrollment.findFirst({
       where: {
         id,
@@ -379,8 +403,10 @@ export class EnrollmentsService {
     };
   }
 
-  // 🔥 KARDEX LIGERO (PURO)
-  async findKardex(id: string, policyScope: Prisma.EnrollmentWhereInput) {
+  // 🔥 KARDEX LIGERO (Recibe el user)
+  async findKardex(id: string, user: any) {
+    const policyScope = this.getAbacScope(user);
+
     const enrollment = await this.prisma.enrollment.findFirst({
       where: {
         id,

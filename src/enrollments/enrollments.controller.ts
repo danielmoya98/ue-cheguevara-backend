@@ -12,7 +12,6 @@ import {
   Req,
 } from '@nestjs/common';
 import { EnrollmentsService } from './enrollments.service';
-import { EnrollmentsPolicy } from './enrollments.policy';
 import { CreateEnrollmentDto } from './dto/create-enrollment.dto';
 import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
@@ -29,16 +28,12 @@ import { SystemPermissions } from '../auth/constants/permissions.constant';
 @UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
 @Controller('enrollments')
 export class EnrollmentsController {
-  constructor(
-    private readonly enrollmentsService: EnrollmentsService,
-    private readonly enrollmentsPolicy: EnrollmentsPolicy,
-  ) {}
+  constructor(private readonly enrollmentsService: EnrollmentsService) {}
 
   @Post()
   @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Crea una nueva inscripción manualmente' })
-  create(@Body() createEnrollmentDto: CreateEnrollmentDto, @Req() req: any) {
-    this.enrollmentsPolicy.canWrite(req.user); // 🔥 Política interna validando
+  create(@Body() createEnrollmentDto: CreateEnrollmentDto) {
     return this.enrollmentsService.create(createEnrollmentDto);
   }
 
@@ -46,8 +41,8 @@ export class EnrollmentsController {
   @RequirePermissions(SystemPermissions.READ_ALL_ENROLLMENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Obtiene el listado de inscripciones' })
   findAll(@Query() query: QueryEnrollmentDto, @Req() req: any) {
-    const scope = this.enrollmentsPolicy.getReadScope(req.user);
-    return this.enrollmentsService.findAll(query, scope);
+    // 🔥 Pasamos el usuario al servicio
+    return this.enrollmentsService.findAll(query, req.user);
   }
 
   @Get(':id/kardex')
@@ -56,8 +51,8 @@ export class EnrollmentsController {
     summary: 'Obtiene un resumen ligero del estudiante para el Kardex',
   })
   findKardex(@Param('id') id: string, @Req() req: any) {
-    const scope = this.enrollmentsPolicy.getReadScope(req.user);
-    return this.enrollmentsService.findKardex(id, scope);
+    // 🔥 Pasamos el usuario al servicio
+    return this.enrollmentsService.findKardex(id, req.user);
   }
 
   @Get(':id')
@@ -66,8 +61,8 @@ export class EnrollmentsController {
     summary: 'Obtiene los detalles completos para el Formulario RUDE',
   })
   findOne(@Param('id') id: string, @Req() req: any) {
-    const scope = this.enrollmentsPolicy.getReadScope(req.user);
-    return this.enrollmentsService.findOne(id, scope);
+    // 🔥 Pasamos el usuario al servicio
+    return this.enrollmentsService.findOne(id, req.user);
   }
 
   @Patch(':id')
@@ -76,29 +71,20 @@ export class EnrollmentsController {
   update(
     @Param('id') id: string,
     @Body() updateEnrollmentDto: UpdateEnrollmentDto,
-    @Req() req: any,
   ) {
-    this.enrollmentsPolicy.canWrite(req.user);
     return this.enrollmentsService.update(id, updateEnrollmentDto);
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT) // 🔥 ABAC (Aplica a Delete también)
-  remove(@Param('id') id: string, @Req() req: any) {
-    this.enrollmentsPolicy.canWrite(req.user);
+  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT) // 🔥 ABAC
+  remove(@Param('id') id: string) {
     return this.enrollmentsService.remove(id);
   }
 
   @Get(':id/rude-pdf')
   @RequirePermissions(SystemPermissions.READ_ALL_ENROLLMENT) // 🔥 ABAC
   @ApiOperation({ summary: 'Genera el PDF oficial del RUDE para el SIE' })
-  async generateRudePdf(
-    @Param('id') id: string,
-    @Res() res: any,
-    @Req() req: any,
-  ) {
-    this.enrollmentsPolicy.getReadScope(req.user);
-
+  async generateRudePdf(@Param('id') id: string, @Res() res: any) {
     return {
       status: 'READY_FOR_INTEGRATION',
       message:

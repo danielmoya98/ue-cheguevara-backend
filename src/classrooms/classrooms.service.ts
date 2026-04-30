@@ -8,8 +8,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateClassroomDto } from './dto/create-classroom.dto';
 import { UpdateClassroomDto } from './dto/update-classroom.dto';
 import { PaginationDto } from '../common/dto/pagination.dto';
-import { AcademicStatus} from '../../prisma/generated/client';
+import { AcademicStatus } from '../../prisma/generated/client';
 import { CreateBulkClassroomsDto } from './dto/create-bulk-classrooms.dto';
+import { SystemPermissions } from '../auth/constants/permissions.constant'; // 🔥 IMPORTAMOS LOS PERMISOS
 
 @Injectable()
 export class ClassroomsService {
@@ -56,12 +57,14 @@ export class ClassroomsService {
     }
   }
 
+  // 🔥 RECIBE EL USUARIO PARA APLICAR EL FILTRO ABAC
   async findAll(
     query: PaginationDto & {
       academicYearId?: string;
       level?: string;
       shift?: string;
     },
+    user: any,
   ) {
     const page = Number(query.page) || 1;
     const limit = Number(query.limit) || 10;
@@ -69,16 +72,36 @@ export class ClassroomsService {
 
     const { search, academicYearId, level, shift } = query;
 
+    // 🔥 FILTRO INTELIGENTE ABAC
+    const permissions = user?.permissions || [];
+    const isPowerUser =
+      permissions.includes(SystemPermissions.MANAGE_ALL) ||
+      permissions.includes(SystemPermissions.MANAGE_ALL_CLASSROOM);
+
     const whereCondition: any = {
-      ...(academicYearId && { academicYearId }),
-      ...(level && { level }),
-      ...(shift && { shift }),
-      ...(search && {
-        OR: [
-          { grade: { contains: search, mode: 'insensitive' } },
-          { section: { contains: search, mode: 'insensitive' } },
-        ],
-      }),
+      AND: [
+        academicYearId ? { academicYearId } : {},
+        level ? { level } : {},
+        shift ? { shift } : {},
+        search
+          ? {
+              OR: [
+                { grade: { contains: search, mode: 'insensitive' } },
+                { section: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {},
+        // 🔥 EL ESCUDO: Si es docente, solo trae cursos donde dicta materia o es asesor
+        // CORRECCIÓN: Usando el nombre correcto de la relación en Prisma (subjectAssignments)
+        !isPowerUser
+          ? {
+              OR: [
+                { advisorId: user.userId },
+                { subjectAssignments: { some: { teacherId: user.userId } } },
+              ],
+            }
+          : {},
+      ],
     };
 
     const [total, data] = await Promise.all([
@@ -191,7 +214,6 @@ export class ClassroomsService {
   async remove(id: string) {
     await this.findOne(id);
 
-    // 🔥 MEJORA DE INTEGRIDAD: Evitamos que Prisma lance error crudo si el curso tiene alumnos
     const enrolledStudents = await this.prisma.enrollment.count({
       where: { classroomId: id },
     });
