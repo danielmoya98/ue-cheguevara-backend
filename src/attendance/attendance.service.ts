@@ -71,69 +71,87 @@ export class AttendanceService {
   // 👨‍🏫 RUTAS DEL DOCENTE (MAGIA DE BLOQUES)
   // ==========================================
 
+  // ==========================================
+  // 🔥 MAGIA: AGRUPAR EN BLOQUES (MÚLTIPLES PROFESORES)
+  // ==========================================
   async getDailySchedule(date: string, user: any) {
     const targetDate = new Date(date);
     const dayOfWeek = targetDate.getUTCDay();
 
+    // 1. Verificamos si es un administrador (ve todo el colegio)
+    const permissions = user.permissions || [];
+    const isPowerUser =
+      permissions.includes('manage:all:all') ||
+      permissions.includes('read:all:Attendance') ||
+      permissions.includes('manage:all:Attendance');
+
+    // 2. Traemos los slots de clase (filtrados si es docente, o todos si es Admin)
     const slots = await this.prisma.scheduleSlot.findMany({
       where: {
         dayOfWeek: dayOfWeek,
-        teacherAssignment: { teacherId: user.userId },
+        ...(isPowerUser
+          ? {}
+          : { teacherAssignment: { teacherId: user.userId } }),
       },
       include: {
         classPeriod: true,
         classroom: true,
-        teacherAssignment: { include: { subject: true } },
+        // 🔥 Incluimos al profesor para que el Director sepa de quién es la clase
+        teacherAssignment: { include: { subject: true, teacher: true } },
         physicalSpace: true,
       },
-      orderBy: { classPeriod: { startTime: 'asc' } },
     });
 
-    // 🔥 Algoritmo de Agrupación de Bloques Consecutivos
-    const blocks: any[] = [];
-    let currentBlock: any = null;
-
+    // 3. Agrupamos los periodos por Asignación (Profesor + Materia + Curso)
+    // Esto evita que se mezclen clases si ocurren a la misma hora en distintos cursos.
+    const groupedByAssignment: Record<string, any[]> = {};
     for (const slot of slots) {
-      if (!currentBlock) {
-        currentBlock = {
-          id: `block_${slot.id}`,
-          classroomId: slot.classroomId,
-          classroom: slot.classroom,
-          subjectName: slot.teacherAssignment.subject.name,
-          teacherAssignmentId: slot.teacherAssignmentId,
-          startTime: slot.classPeriod.startTime,
-          endTime: slot.classPeriod.endTime,
-          classPeriodIds: [slot.classPeriodId], // Array de IDs
-          periodNames: [slot.classPeriod.name],
-        };
-      } else {
-        // ¿Es el mismo curso y la misma materia que el slot anterior?
-        if (
-          currentBlock.teacherAssignmentId === slot.teacherAssignmentId &&
-          currentBlock.classroomId === slot.classroomId
-        ) {
-          // Fusionamos al bloque actual
-          currentBlock.endTime = slot.classPeriod.endTime;
-          currentBlock.classPeriodIds.push(slot.classPeriodId);
-          currentBlock.periodNames.push(slot.classPeriod.name);
-        } else {
-          // Nueva materia/curso, cerramos el bloque anterior y creamos uno nuevo
-          blocks.push(currentBlock);
+      const key = `${slot.teacherAssignmentId}_${slot.classroomId}`;
+      if (!groupedByAssignment[key]) {
+        groupedByAssignment[key] = [];
+      }
+      groupedByAssignment[key].push(slot);
+    }
+
+    const blocks: any[] = [];
+
+    // 4. Transformamos cada grupo en un Bloque sólido
+    for (const key in groupedByAssignment) {
+      const assignmentSlots = groupedByAssignment[key];
+
+      // Ordenamos los periodos cronológicamente para esta materia
+      assignmentSlots.sort((a, b) =>
+        a.classPeriod.startTime.localeCompare(b.classPeriod.startTime),
+      );
+
+      let currentBlock: any = null;
+
+      for (const slot of assignmentSlots) {
+        if (!currentBlock) {
           currentBlock = {
             id: `block_${slot.id}`,
             classroomId: slot.classroomId,
             classroom: slot.classroom,
             subjectName: slot.teacherAssignment.subject.name,
+            teacherName: slot.teacherAssignment.teacher.fullName, // 👈 Clave para el Director
             teacherAssignmentId: slot.teacherAssignmentId,
             startTime: slot.classPeriod.startTime,
             endTime: slot.classPeriod.endTime,
             classPeriodIds: [slot.classPeriodId],
             periodNames: [slot.classPeriod.name],
           };
+        } else {
+          // Fusionamos y extendemos la hora de finalización del bloque
+          currentBlock.endTime = slot.classPeriod.endTime;
+          currentBlock.classPeriodIds.push(slot.classPeriodId);
+          currentBlock.periodNames.push(slot.classPeriod.name);
         }
       }
+      if (currentBlock) blocks.push(currentBlock);
     }
-    if (currentBlock) blocks.push(currentBlock);
+
+    // 5. Ordenamos todos los bloques del colegio por hora de inicio para el frontend
+    blocks.sort((a, b) => a.startTime.localeCompare(b.startTime));
 
     return blocks;
   }

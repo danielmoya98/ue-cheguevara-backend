@@ -35,7 +35,12 @@ export class AttendanceController {
   // ==========================================
 
   @Get('schedule')
-  @RequirePermissions(SystemPermissions.READ_OWN_TIMETABLE)
+  // 🔥 ABAC: Dejamos entrar al Docente (su horario) y al Admin (todo el colegio)
+  @RequirePermissions(
+    SystemPermissions.READ_OWN_TIMETABLE,
+    SystemPermissions.MANAGE_ALL_ATTENDANCE,
+    SystemPermissions.READ_ALL_ATTENDANCE,
+  )
   @ApiOperation({ summary: 'Obtiene el horario del día AGRUPADO EN BLOQUES' })
   async getDailySchedule(@Query('date') date: string, @Req() req: any) {
     return this.attendanceService.getDailySchedule(date, req.user);
