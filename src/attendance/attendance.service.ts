@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { IdentityService } from '../identity/identity.service';
-import { RegisterAttendanceDto } from './dto/register-attendance.dto';
 import {
   AttendanceStatus,
   AttendanceMethod,
@@ -50,7 +49,6 @@ export class AttendanceService {
   private async verifyTeacherClassroomAccess(user: any, classroomId: string) {
     const permissions = user.permissions || [];
 
-    // Si tiene control total o acceso de lectura a toda la asistencia, lo dejamos pasar
     const isPowerUser =
       permissions.includes('manage:all:all') ||
       permissions.includes('read:all:Attendance') ||
@@ -58,7 +56,6 @@ export class AttendanceService {
 
     if (isPowerUser) return;
 
-    // Si no es admin, verificamos que sea el docente de este curso
     const isAssigned = await this.prisma.teacherAssignment.findFirst({
       where: { classroomId: classroomId, teacherId: user.userId },
     });
@@ -71,14 +68,14 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // 👨‍🏫 RUTAS DEL DOCENTE
+  // 👨‍🏫 RUTAS DEL DOCENTE (MAGIA DE BLOQUES)
   // ==========================================
 
   async getDailySchedule(date: string, user: any) {
     const targetDate = new Date(date);
     const dayOfWeek = targetDate.getUTCDay();
 
-    return this.prisma.scheduleSlot.findMany({
+    const slots = await this.prisma.scheduleSlot.findMany({
       where: {
         dayOfWeek: dayOfWeek,
         teacherAssignment: { teacherId: user.userId },
@@ -91,6 +88,54 @@ export class AttendanceService {
       },
       orderBy: { classPeriod: { startTime: 'asc' } },
     });
+
+    // 🔥 Algoritmo de Agrupación de Bloques Consecutivos
+    const blocks: any[] = [];
+    let currentBlock: any = null;
+
+    for (const slot of slots) {
+      if (!currentBlock) {
+        currentBlock = {
+          id: `block_${slot.id}`,
+          classroomId: slot.classroomId,
+          classroom: slot.classroom,
+          subjectName: slot.teacherAssignment.subject.name,
+          teacherAssignmentId: slot.teacherAssignmentId,
+          startTime: slot.classPeriod.startTime,
+          endTime: slot.classPeriod.endTime,
+          classPeriodIds: [slot.classPeriodId], // Array de IDs
+          periodNames: [slot.classPeriod.name],
+        };
+      } else {
+        // ¿Es el mismo curso y la misma materia que el slot anterior?
+        if (
+          currentBlock.teacherAssignmentId === slot.teacherAssignmentId &&
+          currentBlock.classroomId === slot.classroomId
+        ) {
+          // Fusionamos al bloque actual
+          currentBlock.endTime = slot.classPeriod.endTime;
+          currentBlock.classPeriodIds.push(slot.classPeriodId);
+          currentBlock.periodNames.push(slot.classPeriod.name);
+        } else {
+          // Nueva materia/curso, cerramos el bloque anterior y creamos uno nuevo
+          blocks.push(currentBlock);
+          currentBlock = {
+            id: `block_${slot.id}`,
+            classroomId: slot.classroomId,
+            classroom: slot.classroom,
+            subjectName: slot.teacherAssignment.subject.name,
+            teacherAssignmentId: slot.teacherAssignmentId,
+            startTime: slot.classPeriod.startTime,
+            endTime: slot.classPeriod.endTime,
+            classPeriodIds: [slot.classPeriodId],
+            periodNames: [slot.classPeriod.name],
+          };
+        }
+      }
+    }
+    if (currentBlock) blocks.push(currentBlock);
+
+    return blocks;
   }
 
   async getClassroomAttendance(
@@ -115,7 +160,7 @@ export class AttendanceService {
 
     const records = await this.prisma.attendanceRecord.findMany({
       where: {
-        classPeriodId,
+        classPeriodId, // Comprobamos usando el primer periodo del bloque
         date: dateOnly,
         enrollmentId: { in: enrollments.map((e) => e.id) },
       },
@@ -131,6 +176,7 @@ export class AttendanceService {
     });
   }
 
+  // 🔥 GUARDADO MASIVO (MÚLTIPLES PERIODOS A LA VEZ)
   async saveBulkAttendance(bulkData: any, user: any) {
     await this.ensureActiveTrimesterExists();
     await this.verifyTeacherClassroomAccess(user, bulkData.classroomId);
@@ -143,35 +189,47 @@ export class AttendanceService {
     if (!institution)
       throw new InternalServerErrorException('Reglas no configuradas');
 
-    const results = await this.prisma.$transaction(
-      bulkData.records.map((record: any) =>
-        this.prisma.attendanceRecord.upsert({
-          where: {
-            enrollmentId_classPeriodId_date: {
-              enrollmentId: record.enrollmentId,
-              classPeriodId: bulkData.classPeriodId,
-              date: dateOnly,
-            },
-          },
-          update: {
-            status: record.status,
-            method: AttendanceMethod.MANUAL,
-            markedById: user.userId,
-            timestamp: now,
-          },
-          create: {
-            enrollmentId: record.enrollmentId,
-            classPeriodId: bulkData.classPeriodId,
-            date: dateOnly,
-            status: record.status,
-            method: AttendanceMethod.MANUAL,
-            markedById: user.userId,
-            timestamp: now,
-          },
-        }),
-      ),
-    );
+    // Soporte para arreglo de periodos o fallback a un solo periodo
+    const periodIds: string[] = bulkData.classPeriodIds || [
+      bulkData.classPeriodId,
+    ];
 
+    const upsertOperations: any[] = []; // 🔥 Añade ": any[]"
+
+    for (const record of bulkData.records) {
+      for (const periodId of periodIds) {
+        upsertOperations.push(
+          this.prisma.attendanceRecord.upsert({
+            where: {
+              enrollmentId_classPeriodId_date: {
+                enrollmentId: record.enrollmentId,
+                classPeriodId: periodId,
+                date: dateOnly,
+              },
+            },
+            update: {
+              status: record.status,
+              method: AttendanceMethod.MANUAL,
+              markedById: user.userId,
+              timestamp: now,
+            },
+            create: {
+              enrollmentId: record.enrollmentId,
+              classPeriodId: periodId,
+              date: dateOnly,
+              status: record.status,
+              method: AttendanceMethod.MANUAL,
+              markedById: user.userId,
+              timestamp: now,
+            },
+          }),
+        );
+      }
+    }
+
+    const results = await this.prisma.$transaction(upsertOperations);
+
+    // Notificaciones (Solo procesamos una por estudiante, no por cada periodo)
     bulkData.records.forEach((record: any) => {
       this.processSmartNotification(
         record.enrollmentId,
@@ -181,13 +239,16 @@ export class AttendanceService {
       ).catch((e) => this.logger.error('Error enviando Push masivo', e));
     });
 
-    return { message: 'Asistencia guardada con éxito', count: results.length };
+    return {
+      message: 'Asistencia guardada con éxito',
+      count: bulkData.records.length,
+    };
   }
 
   // ==========================================
-  // REGISTRO QR
+  // REGISTRO QR (MÚLTIPLES PERIODOS A LA VEZ)
   // ==========================================
-  async registerScan(dto: RegisterAttendanceDto, user: any) {
+  async registerScan(dto: any, user: any) {
     await this.ensureActiveTrimesterExists();
 
     const institution = await this.prisma.institution.findFirst();
@@ -223,14 +284,19 @@ export class AttendanceService {
 
     await this.verifyTeacherClassroomAccess(user, enrollment.classroomId);
 
-    const classPeriod = await this.prisma.classPeriod.findUnique({
-      where: { id: dto.classPeriodId },
+    // Soporte para arreglo de periodos o fallback
+    const periodIds: string[] = dto.classPeriodIds || [dto.classPeriodId];
+
+    // Calculamos el estatus basado en el PRIMER periodo del bloque
+    const firstPeriod = await this.prisma.classPeriod.findUnique({
+      where: { id: periodIds[0] },
     });
-    if (!classPeriod)
+
+    if (!firstPeriod)
       throw new NotFoundException('Periodo de clase no encontrado.');
 
     const status = this.calculateAttendanceStatus(
-      classPeriod.startTime,
+      firstPeriod.startTime,
       institution.lateToleranceMinutes,
       institution.absentToleranceMinutes,
     );
@@ -239,17 +305,21 @@ export class AttendanceService {
     const dateOnly = new Date(now.toISOString().split('T')[0]);
 
     try {
-      await this.prisma.attendanceRecord.create({
-        data: {
-          enrollmentId: enrollment.id,
-          classPeriodId: classPeriod.id,
-          date: dateOnly,
-          status: status,
-          method: dto.method || AttendanceMethod.QR,
-          timestamp: now,
-          markedById: user.userId,
-        },
-      });
+      await this.prisma.$transaction(
+        periodIds.map((pId) =>
+          this.prisma.attendanceRecord.create({
+            data: {
+              enrollmentId: enrollment.id,
+              classPeriodId: pId,
+              date: dateOnly,
+              status: status,
+              method: dto.method || AttendanceMethod.QR,
+              timestamp: now,
+              markedById: user.userId,
+            },
+          }),
+        ),
+      );
 
       this.processSmartNotification(
         enrollment.id,
@@ -260,6 +330,7 @@ export class AttendanceService {
         this.logger.error('Error enviando Push de asistencia QR', e),
       );
     } catch (error: any) {
+      // Prisma lanza P2002 si el alumno ya escaneó en este bloque
       if (error.code === 'P2002') {
         this.logger.warn(
           `Escaneo duplicado ignorado para ${enrollment.student.names}`,
@@ -267,7 +338,7 @@ export class AttendanceService {
         return this.buildScannerResponse(
           enrollment.student,
           status,
-          'Ya Registrado',
+          'Ya Registrado en este Bloque',
         );
       }
       throw error;
@@ -350,12 +421,9 @@ export class AttendanceService {
   }
 
   // ==========================================
-  // 🛠️ EL PLAN B: MARCADO MANUAL
+  // 🛠️ EL PLAN B: MARCADO MANUAL (MÚLTIPLES PERIODOS)
   // ==========================================
-  async markManualAttendance(
-    dto: import('./dto/manual-attendance.dto').ManualAttendanceDto,
-    user: any,
-  ) {
+  async markManualAttendance(dto: any, user: any) {
     await this.ensureActiveTrimesterExists();
 
     const enrollment = await this.prisma.enrollment.findUnique({
@@ -374,30 +442,36 @@ export class AttendanceService {
         'Reglas de institución no configuradas.',
       );
 
-    const record = await this.prisma.attendanceRecord.upsert({
-      where: {
-        enrollmentId_classPeriodId_date: {
-          enrollmentId: dto.enrollmentId,
-          classPeriodId: dto.classPeriodId,
-          date: dateOnly,
+    const periodIds: string[] = dto.classPeriodIds || [dto.classPeriodId];
+
+    const upsertOperations = periodIds.map((pId) =>
+      this.prisma.attendanceRecord.upsert({
+        where: {
+          enrollmentId_classPeriodId_date: {
+            enrollmentId: dto.enrollmentId,
+            classPeriodId: pId,
+            date: dateOnly,
+          },
         },
-      },
-      update: {
-        status: dto.status,
-        method: AttendanceMethod.MANUAL,
-        markedById: user.userId,
-        timestamp: now,
-      },
-      create: {
-        enrollmentId: dto.enrollmentId,
-        classPeriodId: dto.classPeriodId,
-        date: dateOnly,
-        status: dto.status,
-        method: AttendanceMethod.MANUAL,
-        markedById: user.userId,
-        timestamp: now,
-      },
-    });
+        update: {
+          status: dto.status,
+          method: AttendanceMethod.MANUAL,
+          markedById: user.userId,
+          timestamp: now,
+        },
+        create: {
+          enrollmentId: dto.enrollmentId,
+          classPeriodId: pId,
+          date: dateOnly,
+          status: dto.status,
+          method: AttendanceMethod.MANUAL,
+          markedById: user.userId,
+          timestamp: now,
+        },
+      }),
+    );
+
+    const records = await this.prisma.$transaction(upsertOperations);
 
     this.processSmartNotification(
       dto.enrollmentId,
@@ -408,7 +482,10 @@ export class AttendanceService {
       this.logger.error('Error enviando Push de asistencia Manual', e),
     );
 
-    return { data: record, message: `Asistencia marcada como ${dto.status}` };
+    return {
+      data: records[0],
+      message: `Asistencia marcada como ${dto.status} en el bloque`,
+    };
   }
 
   // ==========================================
@@ -446,7 +523,6 @@ export class AttendanceService {
     });
   }
 
-  // Resto de Helpers (Sin cambios funcionales)...
   private calculateAttendanceStatus(
     startTimeStr: string,
     lateTol: number,
