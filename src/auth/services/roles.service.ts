@@ -16,7 +16,7 @@ export class RolesService {
         _count: { select: { users: true } },
         permissions: { include: { permission: true } },
       },
-      orderBy: { createdAt: 'asc' }, // Para mantener un orden visual lógico
+      orderBy: { createdAt: 'asc' },
     });
   }
 
@@ -44,7 +44,6 @@ export class RolesService {
     });
   }
 
-  // 🔥 NUEVA LÓGICA: Creación
   async createRole(data: { name: string; description: string }) {
     const safeName = data.name.trim().toUpperCase().replace(/ /g, '_');
 
@@ -64,7 +63,6 @@ export class RolesService {
     });
   }
 
-  // 🔥 NUEVA LÓGICA: Eliminación Protegida
   async deleteRole(id: string) {
     const role = await this.prisma.role.findUnique({
       where: { id },
@@ -73,7 +71,6 @@ export class RolesService {
 
     if (!role) throw new NotFoundException('Rol no encontrado');
 
-    // 1. Protección de Roles Core (Hardcoded safety)
     const protectedRoles = [
       'SUPER_ADMIN',
       'DIRECTOR',
@@ -87,7 +84,6 @@ export class RolesService {
       );
     }
 
-    // 2. Protección de Integridad Relacional
     if (role._count.users > 0) {
       throw new BadRequestException(
         `Este rol tiene ${role._count.users} usuarios asignados. Reasígnalos antes de eliminarlo.`,
@@ -99,10 +95,8 @@ export class RolesService {
   }
 
   async seedMasterPermissions() {
-    // 1. LIMPIEZA ABSOLUTA (Garantiza que solo exista el estándar oficial)
     await this.prisma.permission.deleteMany({});
 
-    // 2. EL CATÁLOGO OFICIAL (Tu fuente de la verdad)
     const permissionsData = [
       {
         action: 'manage:all',
@@ -138,6 +132,12 @@ export class RolesService {
         action: 'read:all',
         subject: 'Enrollment',
         description: 'Ver el historial de inscripciones global',
+      },
+      {
+        // 🔥 NUEVO: Agregado al catálogo de Prisma
+        action: 'read:own',
+        subject: 'Enrollment',
+        description: 'Ver únicamente las inscripciones de sus cursos asignados',
       },
       {
         action: 'write:any',
@@ -226,11 +226,9 @@ export class RolesService {
       },
     ];
 
-    // Insertar el catálogo
     await this.prisma.permission.createMany({ data: permissionsData });
     const allPermissions = await this.prisma.permission.findMany();
 
-    // 3. ASIGNACIÓN ESTRICTA DE ROLES BASE
     const superAdmin = await this.prisma.role.findUnique({
       where: { name: 'SUPER_ADMIN' },
     });
@@ -241,7 +239,6 @@ export class RolesService {
       where: { name: 'DOCENTE' },
     });
 
-    // -> SUPER ADMIN: Solo necesita la llave 'manage:all:all'
     if (superAdmin) {
       const rootPerm = allPermissions.find(
         (p) => p.action === 'manage:all' && p.subject === 'all',
@@ -252,7 +249,6 @@ export class RolesService {
         });
     }
 
-    // -> DIRECTOR: Todo lo que es "all" y "any" (Gestión Global), excepto cosas de Root (User, Role, Institution, Audit, all)
     if (director) {
       const directorSubjectsToExclude = [
         'all',
@@ -264,7 +260,7 @@ export class RolesService {
       const directorPerms = allPermissions.filter(
         (p) =>
           !directorSubjectsToExclude.includes(p.subject) &&
-          !p.action.includes('own'), // No le damos 'own' porque él ve 'all'
+          !p.action.includes('own'),
       );
       for (const perm of directorPerms) {
         await this.prisma.rolePermission.create({
@@ -273,7 +269,6 @@ export class RolesService {
       }
     }
 
-    // -> DOCENTE: Exclusivamente permisos "own" y su Dashboard
     if (docente) {
       const docentePerms = allPermissions.filter(
         (p) =>

@@ -17,7 +17,6 @@ import { UpdateEnrollmentDto } from './dto/update-enrollment.dto';
 import { QueryEnrollmentDto } from './dto/query-enrollment.dto';
 import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
 
-// 🔥 IMPORTACIONES ABAC
 import { AuthGuard } from '@nestjs/passport';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
@@ -25,48 +24,57 @@ import { SystemPermissions } from '../auth/constants/permissions.constant';
 
 @ApiTags('Inscripciones')
 @ApiCookieAuth('uecg_access_token')
-@UseGuards(AuthGuard('jwt'), PermissionsGuard) // 🔥 Escudo Activado
+@UseGuards(AuthGuard('jwt'), PermissionsGuard)
 @Controller('enrollments')
 export class EnrollmentsController {
   constructor(private readonly enrollmentsService: EnrollmentsService) {}
 
   @Post()
-  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT) // 🔥 ABAC
+  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT)
   @ApiOperation({ summary: 'Crea una nueva inscripción manualmente' })
   create(@Body() createEnrollmentDto: CreateEnrollmentDto) {
     return this.enrollmentsService.create(createEnrollmentDto);
   }
 
   @Get()
-  @RequirePermissions(SystemPermissions.READ_ALL_ENROLLMENT) // 🔥 ABAC
+  // 🔥 Acepta Admin (ALL) o Docente (OWN)
+  @RequirePermissions(
+    SystemPermissions.READ_ALL_ENROLLMENT,
+    SystemPermissions.READ_OWN_ENROLLMENT,
+  )
   @ApiOperation({ summary: 'Obtiene el listado de inscripciones' })
   findAll(@Query() query: QueryEnrollmentDto, @Req() req: any) {
-    // 🔥 Pasamos el usuario al servicio
     return this.enrollmentsService.findAll(query, req.user);
   }
 
   @Get(':id/kardex')
-  @RequirePermissions(SystemPermissions.READ_ALL_ENROLLMENT) // 🔥 ABAC
+  // 🔥 Acepta Admin (ALL) o Docente (OWN)
+  @RequirePermissions(
+    SystemPermissions.READ_ALL_ENROLLMENT,
+    SystemPermissions.READ_OWN_ENROLLMENT,
+  )
   @ApiOperation({
     summary: 'Obtiene un resumen ligero del estudiante para el Kardex',
   })
   findKardex(@Param('id') id: string, @Req() req: any) {
-    // 🔥 Pasamos el usuario al servicio
     return this.enrollmentsService.findKardex(id, req.user);
   }
 
   @Get(':id')
-  @RequirePermissions(SystemPermissions.READ_ALL_ENROLLMENT) // 🔥 ABAC
+  // 🔥 Acepta Admin (ALL) o Docente (OWN)
+  @RequirePermissions(
+    SystemPermissions.READ_ALL_ENROLLMENT,
+    SystemPermissions.READ_OWN_ENROLLMENT,
+  )
   @ApiOperation({
     summary: 'Obtiene los detalles completos para el Formulario RUDE',
   })
   findOne(@Param('id') id: string, @Req() req: any) {
-    // 🔥 Pasamos el usuario al servicio
     return this.enrollmentsService.findOne(id, req.user);
   }
 
   @Patch(':id')
-  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT) // 🔥 ABAC
+  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT)
   @ApiOperation({ summary: 'Actualiza una inscripción o estado' })
   update(
     @Param('id') id: string,
@@ -76,13 +84,17 @@ export class EnrollmentsController {
   }
 
   @Delete(':id')
-  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT) // 🔥 ABAC
+  @RequirePermissions(SystemPermissions.WRITE_ANY_ENROLLMENT)
   remove(@Param('id') id: string) {
     return this.enrollmentsService.remove(id);
   }
 
   @Get(':id/rude-pdf')
-  @RequirePermissions(SystemPermissions.READ_ALL_ENROLLMENT) // 🔥 ABAC
+  // 🔥 Acepta Admin (ALL) o Docente (OWN)
+  @RequirePermissions(
+    SystemPermissions.READ_ALL_ENROLLMENT,
+    SystemPermissions.READ_OWN_ENROLLMENT,
+  )
   @ApiOperation({ summary: 'Genera el PDF oficial del RUDE para el SIE' })
   async generateRudePdf(@Param('id') id: string, @Res() res: any) {
     return {

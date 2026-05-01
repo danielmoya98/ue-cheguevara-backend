@@ -21,9 +21,7 @@ export class PermissionsSyncService implements OnModuleInit {
     const permissionStrings = Object.values(SystemPermissions);
 
     for (const p of permissionStrings) {
-      // 🔥 NUEVA LÓGICA ABAC: Dividimos "manage:all:PhysicalSpace"
       const parts = p.split(':');
-      // action = "manage:all", subject = "PhysicalSpace"
       const action = `${parts[0]}:${parts[1]}`;
       const subject = parts[2];
 
@@ -46,10 +44,8 @@ export class PermissionsSyncService implements OnModuleInit {
       '🛡️ Sembrando roles estructurales y privilegios iniciales...',
     );
 
-    // Obtenemos todos los permisos recién guardados de la base de datos
     const allDbPermissions = await this.prisma.permission.findMany();
 
-    // Helper para buscar los IDs de los permisos según sus códigos exactos
     const getPermIds = (requiredPerms: string[]) => {
       return allDbPermissions
         .filter((dbPerm) =>
@@ -58,18 +54,15 @@ export class PermissionsSyncService implements OnModuleInit {
         .map((p) => p.id);
     };
 
-    // 🔥 NUEVAS RECETAS ABAC
     const rolesConfig = [
       {
         name: 'SUPER_ADMIN',
         description: 'Administrador Supremo del Sistema (Root)',
-        // Poder absoluto: Le damos TODOS los IDs de la base de datos
         permissionIds: allDbPermissions.map((p) => p.id),
       },
       {
         name: 'DIRECTOR',
         description: 'Máxima Autoridad Pedagógica y Administrativa',
-        // Le damos autonomía casi total, excepto ROOT (MANAGE_ALL) y manipulación de roles pesados
         permissionIds: getPermIds([
           SystemPermissions.MANAGE_ALL_ACADEMIC_YEAR,
           SystemPermissions.READ_ALL_DASHBOARD,
@@ -94,11 +87,10 @@ export class PermissionsSyncService implements OnModuleInit {
       {
         name: 'DOCENTE',
         description: 'Plantel Docente (Acceso web y móvil)',
-        // Solo permisos ":own" y lecturas limitadas a su jurisdicción
         permissionIds: getPermIds([
           SystemPermissions.READ_OWN_DASHBOARD,
           SystemPermissions.READ_OWN_STUDENT,
-          SystemPermissions.READ_ALL_ENROLLMENT,
+          SystemPermissions.READ_OWN_ENROLLMENT, // 🔥 CAMBIO: Ahora solo ve SUS inscripciones
           SystemPermissions.CREATE_OWN_ATTENDANCE,
           SystemPermissions.UPDATE_OWN_GRADE,
           SystemPermissions.READ_OWN_TIMETABLE,
@@ -107,7 +99,6 @@ export class PermissionsSyncService implements OnModuleInit {
       {
         name: 'PADRE',
         description: 'Padre de Familia o Tutor (App Móvil)',
-        // Solo lectura estricta de sus propios dependientes
         permissionIds: getPermIds([SystemPermissions.READ_OWN_GUARDIAN]),
       },
     ];
@@ -116,7 +107,6 @@ export class PermissionsSyncService implements OnModuleInit {
     // 3. EJECUCIÓN (Crear/Actualizar Roles y Asignar Permisos)
     // =========================================================
     for (const config of rolesConfig) {
-      // 3.1 Garantizamos que el rol exista
       const role = await this.prisma.role.upsert({
         where: { name: config.name },
         update: { description: config.description },
@@ -126,13 +116,11 @@ export class PermissionsSyncService implements OnModuleInit {
         },
       });
 
-      // 3.2 Preparamos los datos relacionales
       const rolePermissionsData = config.permissionIds.map((pId) => ({
         roleId: role.id,
         permissionId: pId,
       }));
 
-      // 3.3 Transacción: Limpiamos los permisos viejos e insertamos la nueva receta
       await this.prisma.$transaction([
         this.prisma.rolePermission.deleteMany({
           where: { roleId: role.id },

@@ -17,6 +17,7 @@ export enum SystemPermissions {
 
   // ENROLLMENT (Inscripciones)
   READ_ALL_ENROLLMENT = 'read:all:Enrollment',
+  READ_OWN_ENROLLMENT = 'read:own:Enrollment',
   WRITE_ANY_ENROLLMENT = 'write:any:Enrollment',
 
   // ATTENDANCE (Asistencia)

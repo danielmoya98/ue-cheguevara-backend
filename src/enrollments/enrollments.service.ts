@@ -22,14 +22,16 @@ export class EnrollmentsService {
   // ==========================================
   private getAbacScope(user: any): Prisma.EnrollmentWhereInput {
     const permissions = user?.permissions || [];
+
+    // Verificamos si es un administrador con visión global
     const isPowerUser =
       permissions.includes(SystemPermissions.MANAGE_ALL) ||
-      permissions.includes(SystemPermissions.UPDATE_ALL_STUDENT); // Administradores
+      permissions.includes(SystemPermissions.READ_ALL_ENROLLMENT) ||
+      permissions.includes(SystemPermissions.WRITE_ANY_ENROLLMENT);
 
-    if (isPowerUser) return {};
+    if (isPowerUser) return {}; // Devuelve todo
 
-    // Si es docente, solo ve estudiantes de los cursos donde enseña o es asesor
-    // CORRECCIÓN: Usamos subjectAssignments en lugar de teacherAssignments
+    // Si es docente (tiene read:own), solo ve estudiantes de sus cursos
     return {
       classroom: {
         OR: [
