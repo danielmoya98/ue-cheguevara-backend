@@ -17,25 +17,13 @@ export class PaginationDto {
   @Min(1)
   limit?: number = 10;
 
-  @ApiPropertyOptional({
-    description: 'Término de búsqueda general por nombre o email',
-  })
+  @ApiPropertyOptional({ description: 'Término de búsqueda general' })
   @IsOptional()
   @IsString()
   search?: string;
 
-  @ApiPropertyOptional({
-    description: 'Campo para ordenar. Ej: -createdAt',
-  })
+  @ApiPropertyOptional({ description: 'Campo para ordenar. Ej: -createdAt' })
   @IsOptional()
   @IsString()
   sort?: string;
-
-  // 🔥 CORRECCIÓN: Añadimos role al DTO para que NestJS lo acepte
-  @ApiPropertyOptional({
-    description: 'Filtro por rol específico del usuario',
-  })
-  @IsOptional()
-  @IsString()
-  role?: string;
 }
