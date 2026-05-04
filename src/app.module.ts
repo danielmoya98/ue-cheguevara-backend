@@ -24,6 +24,7 @@ import { GradesModule } from './grades/grades.module';
 import { TrimestersModule } from './trimesters/trimesters.module';
 import { AuditModule } from './audit/audit.module';
 import { DashboardModule } from './dashboard/dashboard.module'; // 👈 Tu nuevo import
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { DashboardModule } from './dashboard/dashboard.module'; // 👈 Tu nuevo
     TrimestersModule,
     AuditModule,
     DashboardModule,
+    ReportsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
